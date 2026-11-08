@@ -73,11 +73,11 @@
     Every file in the directory is parsed before rolling back, as for `up`, so a malformed older file
     blocks gander's `down` where goose's CLI parses only the current version's file.
 16. **The async entry points are thin wrappers: each opens one `AsyncConnection` and hands the
-    sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of decision 11 is the
-    same over aiosqlite (whose adapter maps `AUTOCOMMIT` and commit/rollback onto `sqlite3`'s);
-    tests that fail when the `BEGIN` or the `AUTOCOMMIT` is removed run over `sqlite+aiosqlite`
-    too. The dependency is `sqlalchemy[asyncio]`, which adds greenlet: `sqlalchemy.ext.asyncio`
-    refuses to import without it, and `runner.py` imports `AsyncEngine` at module level. No async
-    driver is a dependency; the app brings its own (aiosqlite is a dev dependency for the tests).
-    Migration files are parsed before the connection opens, blocking the event loop briefly, as
-    the sync functions parse before touching the database.
+    sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of decision
+    11 is the same over aiosqlite (whose adapter maps `AUTOCOMMIT` and commit/rollback onto
+    `sqlite3`'s); tests that fail when the `BEGIN` or the `AUTOCOMMIT` is removed run over
+    `sqlite+aiosqlite` too. The dependency is `sqlalchemy[asyncio]`, which adds greenlet:
+    `sqlalchemy.ext.asyncio` refuses to import without it, and `runner.py` imports `AsyncEngine`
+    at module level. No async driver is a dependency; the app brings its own (aiosqlite is a dev
+    dependency for the tests). Migration files are parsed before the connection opens, blocking
+    the event loop briefly, as the sync functions parse before touching the database.
