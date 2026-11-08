@@ -285,19 +285,22 @@ To switch to gander:
      (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
      gander reads no environment variable. The `pytest` import they used goes too.
    - Every `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip on
-     a test that only needed goose to migrate, with the `os`/`shutil` imports it used, or
-     those tests skip silently once goose is gone. simulacra has one, in
-     `tests/test_schema_sync.py`; hearth has a module-level `pytestmark` in
-     `test_migrate.py` and `test_lifespan.py`, the `needs_goose` decorator in
-     `test_eval_cli.py`, and the skip in `test_schema_sync.py`.
+     a test that only needed goose to migrate, with the `os`/`shutil` imports it used and
+     `pytest` where nothing else uses it, or those tests skip silently once goose is gone.
+     simulacra has one, in `tests/test_schema_sync.py`; hearth has a module-level
+     `pytestmark` in `test_migrate.py` (its only use of `pytest`) and `test_lifespan.py`,
+     the `needs_goose` decorator in `test_eval_cli.py`, and the skip in
+     `test_schema_sync.py`.
    - A CI "Install goose" step and its `GOOSE_VERSION` env (simulacra's
      `.github/workflows/ci.yml`).
    - Text naming goose-py or a required goose binary: `migrate`'s old docstring ("goose
      runs as a subprocess", "Raises goose-py's `GooseError`"), the `GooseNotFoundError`
-     line in simulacra's `generate_schema_sql` docstring, simulacra's CLAUDE.md
-     "goose-py's subprocess" example of a blocking call, and any README, CLAUDE.md or
-     decisions text saying the app needs goose on `PATH` or `GOOSE_BINARY` (simulacra's
-     README and CLAUDE.md; hearth's README and `docs/decisions.md`).
+     line in `generate_schema_sql`'s docstring (`tests/schema_tools.py` in both apps),
+     simulacra's CLAUDE.md "goose-py's subprocess" example of a blocking call, and any
+     README, CLAUDE.md or decisions text saying the app needs goose on `PATH` or
+     `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
+     `docs/decisions.md`). The `Database` and lifespan docstrings stay true: the files are
+     still goose migrations, and they still run before the database opens.
 
 The goose binary is still needed to create a migration: gander has no `create` command,
 so `goose -dir src/<app>/migrations -s create <name> sql` keeps working only with goose
