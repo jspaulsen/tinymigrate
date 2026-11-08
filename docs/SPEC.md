@@ -19,7 +19,7 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 ## Migration files
 
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
-  `<version>` is a positive integer (`00001_create_chat_log.sql`). Files are ordered by
+  `<version>` is a positive integer that fits in 64 bits (`00001_create_chat_log.sql`). Files are ordered by
   the integer, not the string. Files not ending in `.sql` are ignored. Two files with the
   same version, or a `.sql` file without a numeric prefix, are an error.
 - Annotations, as in goose:
@@ -35,7 +35,7 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 - Outside a StatementBegin/End block, a statement ends at a line whose last word before
   any `--` comment ends in `;` (so `x; -- note` ends one, `x;--note` and a `;` mid-line
   do not). Comment-only and blank lines between statements are dropped; inside a
-  statement they are kept. Comments and blank lines before `-- +goose Up` are ignored
+  statement they are kept, and, as in goose, a whitespace-only line starts a statement. Comments and blank lines before `-- +goose Up` are ignored
   (simulacra's `00001_init.sql` has a leading comment); SQL there is an error.
 - Malformed files (no Up, duplicate Up or Down, unterminated StatementBegin, trailing
   statement without `;`) raise a clear error naming the file and line. Both directions

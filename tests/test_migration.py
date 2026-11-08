@@ -1,3 +1,6 @@
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -8,7 +11,8 @@ from gander import GanderError, Migration, MigrationParseError, collect_migratio
 # The real migration directories gander replaces goose-py in, copied from hearth and simulacra.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 
-# (file name, up statement count, down statement count) for every fixture file, counted by hand.
+# (file name, up statement count, down statement count) for every fixture file; matches what
+# goose v3.28.0 executes, which `test_statements_match_what_goose_executes` checks.
 HEARTH_STATEMENT_COUNTS = [
     ("00001_create_chat_log.sql", 7, 5),
     ("00002_add_card_fields_and_import.sql", 21, 5),
@@ -32,10 +36,63 @@ BEGIN
 END;"""
 
 
+# Lines goose's splitter treats specially: a trailing comment, a `;` glued to a comment, a `;`
+# mid-line, a whitespace-only line pulling the next comment into a statement, comments inside
+# statements, and a block in the Down section. Every statement is valid SQLite so goose runs it.
+GOOSE_SPLIT_EDGE_CASES = """-- leading comment
+-- +goose Up
+CREATE TABLE a (x INTEGER);  -- trailing comment
+CREATE TABLE b (x INTEGER);--glued
+CREATE TABLE c (x INTEGER); CREATE TABLE d (
+    -- inner comment
+
+    x INTEGER
+);
+   
+-- pulled into the next statement
+CREATE TABLE e (x INTEGER);
+
+-- +goose Down
+-- +goose StatementBegin
+CREATE TRIGGER t BEFORE DELETE ON a
+BEGIN
+    SELECT RAISE(ABORT, 'no');
+END;
+-- +goose StatementEnd
+DROP TRIGGER t;
+DROP TABLE e;
+DROP TABLE d;
+DROP TABLE c;
+DROP TABLE b;
+DROP TABLE a;
+"""
+
+# How `goose -v` logs each statement it sends: grey ANSI colour around the statement text.
+GOOSE_STATEMENT_PATTERN = re.compile(r"Executing statement: (.*?)\n\x1b\[00m", re.DOTALL)
+
+# goose's `clearStatement` regexes: the log drops column-0 `--` lines and empty lines, so
+# gander's statements get the same treatment before they are compared with it.
+GOOSE_LOG_COMMENT_PATTERN = re.compile(r"^--.*$[\r\n]*", re.MULTILINE)
+GOOSE_LOG_EMPTY_LINE_PATTERN = re.compile(r"^$[\r\n]*", re.MULTILINE)
+
+# The file named `00001_x.sql` with a byte that is not UTF-8 (latin-1 `é`) in a comment.
+NON_UTF8_MIGRATION = b"-- +goose Up\n-- caf\xe9\nSELECT 1;\n"
+
+
 def _write_migration(directory: Path, name: str, text: str) -> Path:
     path = directory / name
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _run_goose(directory: Path, database: Path, command: str) -> list[str]:
+    result = subprocess.run(["goose", "-v", "-dir", str(directory), "sqlite3", str(database), command], capture_output=True, text=True, check=True)
+    return [statement.strip() for statement in GOOSE_STATEMENT_PATTERN.findall(result.stderr)]
+
+
+def _clear_statement(statement: str) -> str:
+    statement = GOOSE_LOG_COMMENT_PATTERN.sub("", statement)
+    return GOOSE_LOG_EMPTY_LINE_PATTERN.sub("", statement).strip()
 
 
 def test_the_parser_names_are_importable_from_the_package_root() -> None:
@@ -62,6 +119,7 @@ def test_every_simulacra_migration_parses_with_its_statement_counts(name: str, u
     assert len(migration.up_statements) == up_count
     assert migration.down_statements is not None
     assert len(migration.down_statements) == down_count
+    assert migration.use_transaction
 
 
 def test_a_statement_block_becomes_one_statement() -> None:
@@ -178,7 +236,7 @@ def test_a_malformed_file_raises_naming_the_file_and_line(tmp_path: Path, text: 
         parse_migration(path)
 
 
-@pytest.mark.parametrize("name", ["foo.sql", "2.sql", "0_zero.sql", "+3_plus.sql", "1a_x.sql"])
+@pytest.mark.parametrize("name", ["foo.sql", "2.sql", "0_zero.sql", "+3_plus.sql", "1a_x.sql", "9223372036854775808_too_big.sql"])
 def test_a_file_name_without_a_positive_numeric_prefix_raises(tmp_path: Path, name: str) -> None:
     path = _write_migration(tmp_path, name, "-- +goose Up\nSELECT 1;\n")
 
@@ -212,3 +270,71 @@ def test_collecting_two_files_with_the_same_version_raises(tmp_path: Path) -> No
 def test_collecting_the_fixture_directories_returns_every_file() -> None:
     assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "hearth")] == [1, 2, 3, 4, 5, 6, 7]
     assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "simulacra")] == [1, 2, 3, 4]
+
+
+def test_a_whitespace_only_line_makes_the_comment_after_it_part_of_the_next_statement(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\n   \n-- c\nSELECT 1;\n")
+
+    assert parse_migration(path).up_statements == ("-- c\nSELECT 1;",)
+
+
+def test_a_comment_after_a_whitespace_only_line_at_the_end_is_an_unterminated_statement(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\nSELECT 1;\n  \n-- trailing comment\n")
+
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql:3: statement has no terminating ';'"):
+        parse_migration(path)
+
+
+def test_an_empty_statement_block_yields_no_statement_and_keeps_the_next_one(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\n-- +goose StatementBegin\n-- +goose StatementEnd\nSELECT 1;\n")
+
+    assert parse_migration(path).up_statements == ("SELECT 1;",)
+
+
+def test_crlf_line_endings_parse_like_lf(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\r\nCREATE TABLE a (\r\n    x INTEGER\r\n);\r\n-- +goose Down\r\nDROP TABLE a;\r\n")
+
+    migration = parse_migration(path)
+
+    assert migration.up_statements == ("CREATE TABLE a (\n    x INTEGER\n);",)
+    assert migration.down_statements == ("DROP TABLE a;",)
+
+
+def test_a_lone_carriage_return_inside_a_statement_is_kept(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\nSELECT 'a\rb';\n")
+
+    assert parse_migration(path).up_statements == ("SELECT 'a\rb';",)
+
+
+def test_a_file_that_is_not_utf8_raises_naming_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "00001_x.sql"
+    path.write_bytes(NON_UTF8_MIGRATION)
+
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql: not valid UTF-8"):
+        parse_migration(path)
+
+
+def test_collecting_ignores_a_subdirectory_named_like_a_migration(tmp_path: Path) -> None:
+    _write_migration(tmp_path, "00001_one.sql", "-- +goose Up\nSELECT 1;\n")
+    (tmp_path / "2_sub.sql").mkdir()
+
+    assert [migration.version for migration in collect_migrations(tmp_path)] == [1]
+
+
+@pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")
+@pytest.mark.parametrize("directory_name", ["hearth", "simulacra", "edge_cases"])
+def test_statements_match_what_goose_executes(tmp_path: Path, directory_name: str) -> None:
+    if directory_name == "edge_cases":
+        directory = tmp_path / "migrations"
+        directory.mkdir()
+        _write_migration(directory, "00001_edge_cases.sql", GOOSE_SPLIT_EDGE_CASES)
+    else:
+        directory = FIXTURE_DIRECTORY / directory_name
+    database = tmp_path / "goose.db"
+    migrations = collect_migrations(directory)
+
+    goose_up_statements = _run_goose(directory, database, "up")
+    goose_down_statements = [statement for _ in migrations for statement in _run_goose(directory, database, "down")]
+
+    assert goose_up_statements == [_clear_statement(statement) for migration in migrations for statement in migration.up_statements]
+    assert goose_down_statements == [_clear_statement(statement) for migration in reversed(migrations) for statement in migration.down_statements or ()]

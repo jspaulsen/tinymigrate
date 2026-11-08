@@ -16,9 +16,10 @@
    against the binary: a statement ends at a line whose last word before a `--` comment ends in
    `;`, so a `;` mid-line does not split. goose's sqlite driver runs a multi-statement string
    that Python's `sqlite3` refuses; the executor has to deal with that, not the parser.
-9. **Deliberate divergences from goose's parser**, all stricter: both directions are parsed and
-   checked up front (as goose's Provider does; its CLI parses only the direction it runs); a
-   duplicate Down, a Down or nested StatementBegin inside a block, and a signed version
-   (`+3_x.sql`) are errors; `ENVSUB ON`/`OFF` is rejected rather than ignored, since running
-   unsubstituted SQL would be wrong; two files with one version raise instead of goose's panic.
-   An empty StatementBegin/End block yields no statement.
+9. **Deliberate divergences from goose's parser**, each checked against the binary: both
+   directions are parsed and checked up front (as goose's Provider does; its CLI parses only the
+   direction it runs, so `goose up` ignores an unterminated Down statement); a signed version
+   (`+3_x.sql`) is rejected; `ENVSUB ON`/`OFF` is rejected rather than honoured, since running
+   unsubstituted SQL would be wrong; two files with one version raise instead of goose's panic; a
+   non-UTF-8 file raises; a subdirectory named like a migration is skipped where goose errors. An
+   empty StatementBegin/End block yields no statement, where goose silently drops the next SQL line.

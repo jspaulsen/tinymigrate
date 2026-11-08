@@ -8,6 +8,9 @@ from gander.errors import MigrationParseError
 # its missing `_`; unlike goose's `strconv.ParseInt`, a sign (`+3_x.sql`) is rejected too.
 _FILE_NAME_PATTERN = re.compile(r"(?P<version>[0-9]+)_(?P<description>.*)\.sql")
 
+# goose parses versions as int64 and SQLite stores `version_id` as a signed 64-bit integer.
+_MAX_VERSION = 2**63 - 1
+
 # The annotations goose v3.28.0 knows, spelled as goose spells them; matched case-insensitively.
 _UP = "Up"
 _DOWN = "Down"
@@ -56,8 +59,10 @@ def parse_migration(path: Path) -> Migration:
     buffer: list[str] = []
     buffer_line_number = 0
 
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
+    for line_number, line in enumerate(_read_lines(path), start=1):
         stripped = line.strip()
+        if current is None and not stripped:
+            continue
         if stripped.startswith("--") and "+goose" in line:
             annotation = _parse_annotation(path, line_number, line)
             if annotation == _UP:
@@ -71,8 +76,9 @@ def parse_migration(path: Path) -> Migration:
                     raise MigrationParseError(f"{path}:{block_line_number}: '-- +goose StatementBegin' without '-- +goose StatementEnd'")
                 if down_statements is not None:
                     raise MigrationParseError(f"{path}:{line_number}: duplicate '-- +goose Down' annotation")
-                if buffer:
+                if "\n".join(buffer).strip():
                     raise MigrationParseError(f"{path}:{buffer_line_number}: statement has no terminating ';'")
+                buffer = []
                 down_statements = []
                 current = down_statements
             elif annotation == _STATEMENT_BEGIN:
@@ -85,16 +91,17 @@ def parse_migration(path: Path) -> Migration:
             elif annotation == _STATEMENT_END:
                 if current is None or not in_block:
                     raise MigrationParseError(f"{path}:{line_number}: '-- +goose StatementEnd' without '-- +goose StatementBegin'")
-                if buffer:
-                    current.append("\n".join(buffer).strip())
-                    buffer = []
+                if statement := "\n".join(buffer).strip():
+                    current.append(statement)
+                buffer = []
                 in_block = False
             else:
                 use_transaction = False
             continue
 
-        # Comments and blank lines between statements are dropped; inside one they are kept.
-        if not buffer and (not stripped or stripped.startswith("--")):
+        # goose's check, kept exact: only an empty line is skipped here, so a whitespace-only
+        # line starts a statement and the comments after it become part of that statement.
+        if not buffer and (not line or stripped.startswith("--")):
             continue
         if current is None:
             raise MigrationParseError(f"{path}:{line_number}: SQL before the '-- +goose Up' annotation")
@@ -109,7 +116,7 @@ def parse_migration(path: Path) -> Migration:
         raise MigrationParseError(f"{path}: no '-- +goose Up' annotation")
     if in_block:
         raise MigrationParseError(f"{path}:{block_line_number}: '-- +goose StatementBegin' without '-- +goose StatementEnd'")
-    if buffer:
+    if "\n".join(buffer).strip():
         raise MigrationParseError(f"{path}:{buffer_line_number}: statement has no terminating ';'")
     return Migration(
         version=version,
@@ -146,7 +153,19 @@ def _parse_file_name(path: Path) -> tuple[int, str]:
     version = int(match["version"])
     if version < 1:
         raise MigrationParseError(f"{path}: version must be greater than zero")
+    if version > _MAX_VERSION:
+        raise MigrationParseError(f"{path}: version must be at most {_MAX_VERSION}")
     return version, match["description"]
+
+
+def _read_lines(path: Path) -> list[str]:
+    # Decoded by hand rather than with `read_text`, whose universal newlines would turn a
+    # lone `\r` inside a string literal into `\n`; goose only drops the `\r` of a `\r\n`.
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise MigrationParseError(f"{path}: not valid UTF-8 ({error})") from error
+    return [line.removesuffix("\r") for line in text.split("\n")]
 
 
 def _parse_annotation(path: Path, line_number: int, line: str) -> str:
