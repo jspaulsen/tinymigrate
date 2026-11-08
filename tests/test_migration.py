@@ -159,6 +159,14 @@ def test_a_utf8_byte_order_mark_is_ignored(tmp_path: Path) -> None:
     assert parse_migration(path).up_statements == ("SELECT 1;",)
 
 
+def test_a_bad_byte_after_a_byte_order_mark_is_reported_at_its_line(tmp_path: Path) -> None:
+    path = tmp_path / "00001_x.sql"
+    path.write_bytes(b"\xef\xbb\xbf-- up\n\xe9SELECT 1;\n")
+
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql:2: not valid UTF-8 .* at byte 9"):
+        parse_migration(path)
+
+
 def test_parsing_a_missing_file_raises_naming_it(tmp_path: Path) -> None:
     with pytest.raises(MigrationParseError, match=r"00001_x\.sql: cannot read the migration file") as raised:
         parse_migration(tmp_path / "00001_x.sql")

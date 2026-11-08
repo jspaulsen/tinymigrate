@@ -158,9 +158,9 @@ def _read_lines(path: Path) -> list[str]:
     except OSError as error:
         raise MigrationParseError(f"{path}: cannot read the migration file: {error.strerror}") from error
     try:
-        text = data.decode("utf-8-sig")
+        text = data.decode("utf-8")
     except UnicodeDecodeError as error:
         line_number = data.count(b"\n", 0, error.start) + 1
         raise MigrationParseError(f"{path}:{line_number}: not valid UTF-8 ({error.reason} at byte {error.start})") from error
 
-    return [line.removesuffix("\r") for line in text.split("\n")]
+    return [line.removesuffix("\r") for line in text.removeprefix("\ufeff").split("\n")]

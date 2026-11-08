@@ -252,7 +252,8 @@ To switch to gander:
 
    That is GNU sed (on macOS, `gsed`), and it matches only annotations spelled exactly so;
    goose also accepted other cases and trailing whitespace. `collect_migrations` raises on
-   any `+goose` left, naming its line, so run it over the directory and fix what it reports.
+   any `-- +goose` annotation line left, naming its line, so run it over the directory and
+   fix what it reports.
    A `-- +goose NO TRANSACTION` below `-- +goose Up` must move above `-- up`. goose can no
    longer read the files.
 3. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
@@ -311,10 +312,10 @@ To switch to gander:
      `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
      `docs/decisions.md`), and text calling the files goose migrations.
 
-gander has no `create` command, and goose's `create` writes goose annotations, so a new migration
-is written by hand: the next version, zero-padded to five digits as before
-(`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's README
-and CLAUDE.md to say so.
+gander has no `create` command, and goose's `create` writes goose annotations, so a new
+migration is written by hand: the next version, zero-padded to five digits as before
+(`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's
+README and CLAUDE.md to say so.
 
 An app can instead call `migrate_up_async` on its own `AsyncEngine` and drop the thread.
 Then the parent directory must exist before the engine opens the file, every

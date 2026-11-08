@@ -105,30 +105,31 @@
 20. **`Migration`, `parse_migration` and `collect_migrations` stay exported and are documented** in
     the README, for tooling that needs the migrations without a database (a schema snapshot, a CI
     check of the directory).
-21. **gander has its own migration syntax, not goose's** (supersedes 8 and 9). The user never meant
-    to match goose's parser, and porting it meant porting its quirks (a `;` mid-line not
-    splitting, a whitespace-only line pulling comments into a statement, annotation edge cases).
-    Markers are whole lines, `-- up`, `-- down` and `-- no transaction`, case-insensitive with
-    surrounding whitespace ignored; `--up` is just a comment. A leftover goose annotation (a `--`
-    comment whose text starts with `+goose`, any case) is an error rather than a comment, since
-    an unconverted `-- +goose Down` would otherwise put the down SQL in the up section and run it.
-    A marker line while a statement is still open raises, naming both lines, rather than
-    reporting the statement as incomplete. Statements are lines accumulated until
-    `sqlite3.complete_statement` accepts them, so trigger bodies need no StatementBegin/End.
-    Choices the issue left open: `-- no transaction` after `-- up` is an error rather than a
-    comment, so a misplaced one cannot silently leave the file transactional; "comments" before
-    `-- up` and in a dropped remainder mean `--` line comments, so a `/* */` block there is
-    SQL before `-- up` or an incomplete statement, loud rather than silently skipped; comments
-    before a statement stay part of it, and an incomplete one is reported at its first SQL
-    line. A file that cannot be read, or a UTF-8 byte-order mark, are handled too: the first
-    raises `MigrationParseError`, the second is skipped. The file-name rules, the 64-bit version limit, the
-    UTF-8 check and keeping a lone `\r` are unchanged. goose can no longer read gander's files,
-    so the tests that cross-checked parsing or file-driven runs against the goose binary are
-    gone; the version-table checks against goose stay until gander owns that table too.
+21. **gander has its own migration syntax, not goose's** (supersedes 8 and 9). The user never
+    meant to match goose's parser, and porting it meant porting its quirks (a `;` mid-line not
+    splitting, a whitespace-only line pulling comments into a statement, annotation edge
+    cases). Markers are whole lines, `-- up`, `-- down` and `-- no transaction`,
+    case-insensitive with surrounding whitespace ignored; `--up` is just a comment. A leftover
+    goose annotation (a `--` comment whose text starts with `+goose`, any case, checked on every
+    line, inside literals too) is an error rather than a comment, since an unconverted
+    `-- +goose Down` would otherwise put the down SQL in the up section and run it. A marker
+    line while a statement is still open raises, naming both lines, rather than reporting the
+    statement as incomplete. Statements are lines accumulated until `sqlite3.complete_statement`
+    accepts them, so trigger bodies need no StatementBegin/End. Choices the issue left open:
+    `-- no transaction` after `-- up` is an error rather than a comment, so a misplaced one
+    cannot silently leave the file transactional; "comments" before `-- up` and in a dropped
+    remainder mean `--` line comments, so a `/* */` block there is SQL before `-- up` or an
+    incomplete statement, loud rather than silently skipped; comments before a statement stay
+    part of it, and an incomplete one is reported at its first SQL line. An unreadable file
+    raises `MigrationParseError`; a UTF-8 byte-order mark is skipped. The file-name rules, the
+    64-bit version limit, the UTF-8 check and keeping a lone `\r` are unchanged. goose can no
+    longer read gander's files, so the tests that cross-checked parsing or file-driven runs
+    against the goose binary are gone; the version-table checks against goose stay until gander
+    owns that table too.
 22. **A missing or non-directory migration path raises `MigrationParseError` naming it**, with
     the `OSError` as `__cause__`, rather than a bare `FileNotFoundError`/`NotADirectoryError`,
-    so every error gander raises is a `GanderError`. goose v3.28.0's `up` and `down` also fail on
-    a missing one (`nope directory does not exist`) without creating the database, which a test
-    checks against the binary (goose reports a file path as `no migration files found`); gander, which
-    parses before connecting, does not touch the database either. It reuses
+    so every error gander raises is a `GanderError`. goose v3.28.0's `up` and `down` also fail
+    on a missing one (`nope directory does not exist`) without creating the database, which a
+    test checks against the binary (goose reports a file path as `no migration files found`);
+    gander, which parses before connecting, does not touch the database either. It reuses
     `MigrationParseError`, as 17 does for an empty directory.
