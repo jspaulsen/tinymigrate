@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import Connection, Engine, inspect, text
 from sqlalchemy.exc import DBAPIError
 
-from gander.errors import MigrationExecutionError, UnsupportedDialectError
+from gander.errors import MigrationExecutionError, MigrationRollbackError, UnsupportedDialectError
 from gander.migration import Migration, collect_migrations
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,25 @@ def migrate_up(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE) -
         _migrate_up(connection, migrations, table)
 
 
+def migrate_down(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+    """
+    Roll back the migration of the current version with its Down section.
+
+    The current version is the one `get_version` returns, and as there the version table is
+    created when it does not exist, even when the rollback then raises. Its Down statements
+    run in one transaction together with deleting every version-table row for it, so a
+    failing one leaves the schema and the rows as they were; a `NO TRANSACTION` file runs
+    statement by statement in autocommit. Raises `MigrationRollbackError` when the database
+    is at version 0, when `directory` has no file for the current version or that file has
+    no Down section, `MigrationParseError` before touching the database when any file in
+    `directory` is malformed, `MigrationExecutionError` naming the file when the database
+    rejects it, and `UnsupportedDialectError` for a database other than SQLite.
+    """
+    migrations = collect_migrations(directory)
+    with engine.connect() as connection:
+        _migrate_down(connection, migrations, directory, table)
+
+
 def _get_version(connection: Connection, table: str) -> int:
     _prepare_connection(connection)
     with _begin_transaction(connection):
@@ -75,6 +94,20 @@ def _migrate_up(connection: Connection, migrations: list[Migration], table: str)
             continue
         _run_migration(connection, migration, migration.up_statements, lambda connection, version=migration.version: _insert_version(connection, table, version))
         logger.info("applied migration %s", migration.path.name)
+
+
+def _migrate_down(connection: Connection, migrations: list[Migration], directory: Path, table: str) -> None:
+    current = _get_version(connection, table)
+    if current == 0:
+        raise MigrationRollbackError(f"no migration to roll back: the database is at version 0 in {table}")
+    migration = next((migration for migration in migrations if migration.version == current), None)
+    if migration is None:
+        raise MigrationRollbackError(f"no migration file for the current version {current} in {directory}")
+    if migration.down_statements is None:
+        raise MigrationRollbackError(f"{migration.path}: cannot roll back version {current}: the file has no -- +goose Down section")
+
+    _run_migration(connection, migration, migration.down_statements, lambda connection: _delete_version(connection, table, current))
+    logger.info("rolled back migration %s", migration.path.name)
 
 
 def _prepare_connection(connection: Connection) -> None:
@@ -105,7 +138,7 @@ def _run_migration(connection: Connection, migration: Migration, statements: tup
                         raise MigrationExecutionError(f"{migration.path}: statement failed: {error.orig}\n{sql}") from error
             record_version(connection)
     except DBAPIError as error:
-        raise MigrationExecutionError(f"{migration.path}: failed to record version {migration.version} or commit: {error.orig}") from error
+        raise MigrationExecutionError(f"{migration.path}: failed to update the version table for version {migration.version} or commit: {error.orig}") from error
 
 
 def _split_statement(statement: str) -> list[str]:
@@ -135,6 +168,11 @@ def _ensure_version_table(connection: Connection, table: str) -> None:
 
 def _insert_version(connection: Connection, table: str, version: int) -> None:
     connection.execute(text(f"INSERT INTO {table} (version_id, is_applied) VALUES (:version, 1)"), {"version": version})
+
+
+def _delete_version(connection: Connection, table: str, version: int) -> None:
+    # As goose does, every row for the version goes, not only the newest.
+    connection.execute(text(f"DELETE FROM {table} WHERE version_id = :version"), {"version": version})
 
 
 def _read_version(connection: Connection, table: str) -> int:

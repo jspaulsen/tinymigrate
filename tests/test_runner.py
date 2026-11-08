@@ -10,7 +10,7 @@ from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 from sqlalchemy.exc import DBAPIError
 
 import gander
-from gander import GanderError, MigrationExecutionError, UnsupportedDialectError, get_version, migrate_up
+from gander import GanderError, MigrationExecutionError, MigrationRollbackError, UnsupportedDialectError, get_version, migrate_down, migrate_up
 
 # The real migration directories gander replaces goose-py in, copied from hearth and simulacra.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
@@ -84,8 +84,9 @@ def _copy_first_migrations(source: Path, destination: Path, count: int) -> Path:
 
 
 def test_the_runner_names_are_importable_from_the_package_root() -> None:
-    assert {"get_version", "migrate_up", "MigrationExecutionError", "UnsupportedDialectError"} <= set(gander.__all__)
+    assert {"get_version", "migrate_up", "migrate_down", "MigrationExecutionError", "MigrationRollbackError", "UnsupportedDialectError"} <= set(gander.__all__)
     assert issubclass(MigrationExecutionError, GanderError)
+    assert issubclass(MigrationRollbackError, GanderError)
     assert issubclass(UnsupportedDialectError, GanderError)
 
 
@@ -98,6 +99,16 @@ def test_the_version_table_name_is_a_parameter(engine: Engine, database_path: Pa
     migrate_up(engine, SIMULACRA_DIRECTORY, table="schema_version")
 
     assert get_version(engine, table="schema_version") == SIMULACRA_LATEST_VERSION
+    assert VERSION_TABLE not in _read_table_names(database_path)
+
+
+def test_migrate_down_uses_the_version_table_name_it_is_given(engine: Engine, database_path: Path) -> None:
+    migrate_up(engine, SIMULACRA_DIRECTORY, table="schema_version")
+
+    migrate_down(engine, SIMULACRA_DIRECTORY, table="schema_version")
+
+    assert get_version(engine, table="schema_version") == SIMULACRA_LATEST_VERSION - 1
+    assert _read_version_rows(database_path, "schema_version") == [(0, 1), (1, 1), (2, 1), (3, 1)]
     assert VERSION_TABLE not in _read_table_names(database_path)
 
 
@@ -282,7 +293,7 @@ def test_a_failing_commit_rolls_back_its_migration(engine: Engine, database_path
     _write_migration(directory, "00001_x.sql", migration_text)
     event.listen(engine, "connect", lambda dbapi_connection, _record: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
 
-    with pytest.raises(MigrationExecutionError, match=r"00001_x\.sql: failed to record version 1 or commit: FOREIGN KEY constraint failed"):
+    with pytest.raises(MigrationExecutionError, match=r"00001_x\.sql: failed to update the version table for version 1 or commit: FOREIGN KEY constraint failed"):
         migrate_up(engine, directory)
 
     assert "a" not in _read_table_names(database_path)
@@ -367,3 +378,198 @@ def test_goose_continues_a_database_gander_migrated_part_way(engine: Engine, dat
 
     assert get_version(engine) == latest
     assert _read_version_rows(database_path) == [(version, 1) for version in range(latest + 1)]
+
+
+def test_migrate_down_rolls_back_the_newest_migration_and_deletes_its_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    partial_database = tmp_path / "partial.db"
+    partial_engine = create_engine(f"sqlite:///{partial_database}")
+    try:
+        migrate_up(partial_engine, _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", SIMULACRA_LATEST_VERSION - 1))
+    finally:
+        partial_engine.dispose()
+    migrate_up(engine, SIMULACRA_DIRECTORY)
+
+    migrate_down(engine, SIMULACRA_DIRECTORY)
+
+    assert get_version(engine) == SIMULACRA_LATEST_VERSION - 1
+    assert _read_schema(database_path) == _read_schema(partial_database)
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1), (2, 1), (3, 1)]
+
+
+def test_migrate_down_deletes_every_row_of_the_rolled_back_version(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\n")
+    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n-- +goose Down\nDROP TABLE b;\n")
+    migrate_up(engine, directory)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 1)")
+
+    migrate_down(engine, directory)
+
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+def test_migrate_down_rolls_back_the_current_version_not_the_largest(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\n")
+    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n-- +goose Down\nDROP TABLE b;\n")
+    migrate_up(engine, directory)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 0)")
+
+    migrate_down(engine, directory)
+
+    assert "a" not in _read_table_names(database_path)
+    assert "b" in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1), (2, 1), (2, 0)]
+
+
+def test_migrate_down_on_a_fresh_database_raises(engine: Engine, database_path: Path) -> None:
+    with pytest.raises(MigrationRollbackError, match="no migration to roll back"):
+        migrate_down(engine, SIMULACRA_DIRECTORY)
+
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+def test_migrate_down_raises_when_the_current_versions_file_is_missing(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    migrate_up(engine, SIMULACRA_DIRECTORY)
+    schema = _read_schema(database_path)
+
+    with pytest.raises(MigrationRollbackError, match=f"no migration file for the current version {SIMULACRA_LATEST_VERSION} in"):
+        migrate_down(engine, _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", 2))
+
+    assert _read_schema(database_path) == schema
+    assert get_version(engine) == SIMULACRA_LATEST_VERSION
+
+
+def test_migrate_down_raises_for_a_migration_without_a_down_section(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
+    migrate_up(engine, directory)
+
+    with pytest.raises(MigrationRollbackError, match=r"00001_a\.sql: .*no -- \+goose Down section"):
+        migrate_down(engine, directory)
+
+    assert "a" in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+def test_migrate_down_with_an_empty_down_section_only_deletes_the_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\n")
+    migrate_up(engine, directory)
+
+    migrate_down(engine, directory)
+
+    assert "a" in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+def test_a_failing_down_leaves_the_schema_and_version_row_intact(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
+    migrate_up(engine, directory)
+    schema = _read_schema(database_path)
+
+    with pytest.raises(MigrationExecutionError, match=r"00001_a\.sql: .*no such table: missing"):
+        migrate_down(engine, directory)
+
+    assert _read_schema(database_path) == schema
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+def test_a_no_transaction_down_runs_in_autocommit(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n-- +goose Down\nVACUUM;\n")
+    migrate_up(engine, directory)
+
+    migrate_down(engine, directory)
+
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+def test_a_transactional_down_runs_inside_a_transaction(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_vacuum.sql", "-- +goose Up\nSELECT 1;\n-- +goose Down\nVACUUM;\n")
+    migrate_up(engine, directory)
+
+    with pytest.raises(MigrationExecutionError, match="cannot VACUUM from within a transaction"):
+        migrate_down(engine, directory)
+
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
+def test_rolling_every_migration_back_and_reapplying_gives_the_same_schema(engine: Engine, database_path: Path, directory: Path, latest: int) -> None:
+    migrate_up(engine, directory)
+    schema = _read_schema(database_path)
+
+    for _ in range(latest):
+        migrate_down(engine, directory)
+    assert get_version(engine) == 0
+    assert _read_table_names(database_path) == {VERSION_TABLE, "sqlite_sequence"}
+    migrate_up(engine, directory)
+
+    assert _read_schema(database_path) == schema
+    assert get_version(engine) == latest
+
+
+@requires_goose
+@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
+def test_goose_down_and_migrate_down_leave_the_same_database(engine: Engine, database_path: Path, tmp_path: Path, directory: Path, latest: int) -> None:
+    goose_database = tmp_path / "goose.db"
+    migrate_up(engine, directory)
+    shutil.copy(database_path, goose_database)
+
+    _run_goose(directory, goose_database, "down")
+    migrate_down(engine, directory)
+
+    assert _read_schema(database_path) == _read_schema(goose_database)
+    assert _read_version_rows(database_path) == _read_version_rows(goose_database)
+    assert get_version(engine) == latest - 1
+
+
+@requires_goose
+@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
+def test_goose_reads_the_version_migrate_down_leaves_on_a_database_goose_migrated(engine: Engine, database_path: Path, directory: Path, latest: int) -> None:
+    _run_goose(directory, database_path, "up")
+
+    migrate_down(engine, directory)
+    migrate_down(engine, directory)
+
+    assert f"goose: version {latest - 2}" in _run_goose(directory, database_path, "version")
+    _run_goose(directory, database_path, "up")
+    assert f"goose: version {latest}" in _run_goose(directory, database_path, "version")
+
+
+@requires_goose
+def test_goose_down_rolls_back_the_same_version_as_migrate_down_when_a_row_is_not_applied(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    goose_database = tmp_path / "goose.db"
+    migrate_up(engine, SIMULACRA_DIRECTORY)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 1)")
+        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (4, 0)")
+    shutil.copy(database_path, goose_database)
+
+    _run_goose(SIMULACRA_DIRECTORY, goose_database, "down")
+    migrate_down(engine, SIMULACRA_DIRECTORY)
+
+    assert _read_schema(database_path) == _read_schema(goose_database)
+    assert _read_version_rows(database_path) == _read_version_rows(goose_database)
+
+
+@requires_goose
+def test_goose_down_also_fails_and_changes_nothing_where_migrate_down_raises(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    partial_directory = _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", 2)
+    fresh_database = tmp_path / "fresh.db"
+    migrated_database = tmp_path / "migrated.db"
+    migrate_up(engine, SIMULACRA_DIRECTORY)
+    shutil.copy(database_path, migrated_database)
+
+    for directory, database in [(SIMULACRA_DIRECTORY, fresh_database), (partial_directory, migrated_database)]:
+        command = ["goose", "-dir", str(directory), "sqlite3", str(database), "down"]
+        assert subprocess.run(command, capture_output=True, text=True, check=False).returncode != 0
+
+    assert _read_version_rows(fresh_database) == [(0, 1)]
+    assert _read_schema(migrated_database) == _read_schema(database_path)
+    assert _read_version_rows(migrated_database) == _read_version_rows(database_path)

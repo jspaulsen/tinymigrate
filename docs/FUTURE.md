@@ -11,3 +11,4 @@
 - Turn `PRAGMA foreign_keys` off while migrating (goose's own connection has it off), so a
   table rebuild on an app engine with `foreign_keys=ON` cannot cascade.
 - Support engines using SQLAlchemy's pysqlite "emit BEGIN on begin" recipe.
+- An opt-in to roll back a file with no Down section by deleting its row only, as goose does.
