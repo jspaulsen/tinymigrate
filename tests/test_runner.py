@@ -4,13 +4,28 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlmodel import Field, SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 import gander
-from gander import GanderError, MigrationExecutionError, MigrationRollbackError, UnsupportedDialectError, get_version, migrate_down, migrate_up
+from gander import (
+    GanderError,
+    MigrationExecutionError,
+    MigrationRollbackError,
+    TransactionStateError,
+    UnsupportedDialectError,
+    get_version,
+    get_version_async,
+    migrate_down,
+    migrate_down_async,
+    migrate_up,
+    migrate_up_async,
+)
 
 # The real migration directories gander replaces goose-py in, copied from hearth and simulacra.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
@@ -573,3 +588,171 @@ def test_goose_down_also_fails_and_changes_nothing_where_migrate_down_raises(eng
     assert _read_version_rows(fresh_database) == [(0, 1)]
     assert _read_schema(migrated_database) == _read_schema(database_path)
     assert _read_version_rows(migrated_database) == _read_version_rows(database_path)
+
+
+def test_a_failing_no_transaction_down_keeps_its_earlier_statements_and_the_version_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    down = "-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\nDROP TABLE b;\n"
+    migration_text = f"-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n{down}"
+    _write_migration(directory, "00001_ab.sql", migration_text)
+    migrate_up(engine, directory)
+
+    with pytest.raises(MigrationExecutionError, match=r"00001_ab\.sql: .*no such table: missing"):
+        migrate_down(engine, directory)
+
+    assert "a" not in _read_table_names(database_path)
+    assert "b" in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+def _begin_on_connect(connection: Connection) -> None:
+    connection.exec_driver_sql("SELECT 1")
+
+
+def test_a_connection_that_already_began_a_transaction_raises(engine: Engine, database_path: Path) -> None:
+    event.listen(engine, "engine_connect", _begin_on_connect)
+
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        get_version(engine)
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        migrate_up(engine, SIMULACRA_DIRECTORY)
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        migrate_down(engine, SIMULACRA_DIRECTORY)
+
+    assert not database_path.exists() or _read_table_names(database_path) == set()
+
+
+async def test_get_version_async_reads_a_fresh_database_as_version_zero(async_engine: AsyncEngine, database_path: Path) -> None:
+    assert await get_version_async(async_engine) == 0
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
+async def test_the_async_functions_build_and_roll_back_the_same_schema_as_the_sync_ones(
+    async_engine: AsyncEngine, database_path: Path, tmp_path: Path, directory: Path, latest: int
+) -> None:
+    sync_database = tmp_path / "sync.db"
+    sync_engine = create_engine(f"sqlite:///{sync_database}")
+    try:
+        migrate_up(sync_engine, directory)
+    finally:
+        sync_engine.dispose()
+
+    await migrate_up_async(async_engine, directory)
+
+    assert await get_version_async(async_engine) == latest
+    assert _read_schema(database_path) == _read_schema(sync_database)
+    assert _read_version_rows(database_path) == _read_version_rows(sync_database)
+    for _ in range(latest):
+        await migrate_down_async(async_engine, directory)
+    assert await get_version_async(async_engine) == 0
+    assert _read_table_names(database_path) == {VERSION_TABLE, "sqlite_sequence"}
+
+
+async def test_the_async_functions_use_the_version_table_name_they_are_given(async_engine: AsyncEngine, database_path: Path) -> None:
+    await migrate_up_async(async_engine, SIMULACRA_DIRECTORY, table="schema_version")
+    await migrate_down_async(async_engine, SIMULACRA_DIRECTORY, table="schema_version")
+
+    assert await get_version_async(async_engine, table="schema_version") == SIMULACRA_LATEST_VERSION - 1
+    assert VERSION_TABLE not in _read_table_names(database_path)
+
+
+async def test_a_failure_in_the_second_statement_over_aiosqlite_leaves_no_partial_schema_or_version_row(async_engine: AsyncEngine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
+
+    with pytest.raises(MigrationExecutionError, match=r"00001_a\.sql: .*no such table: missing") as raised:
+        await migrate_up_async(async_engine, directory)
+
+    assert isinstance(raised.value.__cause__, DBAPIError)
+    assert _read_table_names(database_path) == {VERSION_TABLE, "sqlite_sequence"}
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+async def test_a_failing_down_over_aiosqlite_leaves_the_schema_and_version_row_intact(async_engine: AsyncEngine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
+    await migrate_up_async(async_engine, directory)
+
+    with pytest.raises(MigrationExecutionError, match="no such table: missing"):
+        await migrate_down_async(async_engine, directory)
+
+    assert "a" in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1)]
+
+
+async def test_a_transactional_migration_over_aiosqlite_runs_inside_a_transaction(async_engine: AsyncEngine, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_vacuum.sql", "-- +goose Up\nVACUUM;\n")
+
+    with pytest.raises(MigrationExecutionError, match="cannot VACUUM from within a transaction"):
+        await migrate_up_async(async_engine, directory)
+
+
+async def test_a_no_transaction_migration_over_aiosqlite_runs_in_autocommit_and_keeps_what_ran_before_a_failure(
+    async_engine: AsyncEngine, database_path: Path, tmp_path: Path
+) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n-- +goose Down\nVACUUM;\n")
+    _write_migration(directory, "00002_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00003_b.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
+
+    with pytest.raises(MigrationExecutionError, match=r"00003_b\.sql: "):
+        await migrate_up_async(async_engine, directory)
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT x FROM a").fetchall() == [(1,)]
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1), (2, 1)]
+
+
+async def test_an_async_connection_that_already_began_a_transaction_raises(async_engine: AsyncEngine) -> None:
+    event.listen(async_engine.sync_engine, "engine_connect", _begin_on_connect)
+
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        await get_version_async(async_engine)
+
+
+class Character(SQLModel, table=True):
+    """
+    A row of hearth's `characters` table, mapped onto the columns its first migration creates.
+    """
+
+    __tablename__ = "characters"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    description: str
+    first_message: str
+    created_at: str
+
+
+class Chat(SQLModel, table=True):
+    """
+    A row of hearth's `chats` table, whose `character_id` references `characters`.
+    """
+
+    __tablename__ = "chats"
+
+    id: int | None = Field(default=None, primary_key=True)
+    character_id: int = Field(foreign_key="characters.id")
+    created_at: str
+
+
+async def test_a_sqlmodel_async_session_reads_and_writes_a_table_the_async_migrations_built(async_engine: AsyncEngine) -> None:
+    await migrate_up_async(async_engine, HEARTH_DIRECTORY)
+    sessions = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with sessions() as session:
+        session.add(Character(name="Mira", description="a cartographer", first_message="Hello.", created_at="2026-01-01T00:00:00Z"))
+        await session.commit()
+    async with sessions() as session:
+        characters = [(character.name, character.first_message) for character in (await session.exec(select(Character))).all()]
+        session.add(Chat(character_id=999, created_at="2026-01-01T00:00:00Z"))
+        with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+            await session.commit()
+        await session.rollback()
+        foreign_keys = (await session.exec(text("PRAGMA foreign_keys"))).scalar()  # ty: ignore[no-matching-overload]  # exec takes a select; a PRAGMA is text.
+
+    assert characters == [("Mira", "Hello.")]
+    assert foreign_keys == 1
+    assert await get_version_async(async_engine) == HEARTH_LATEST_VERSION

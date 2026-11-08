@@ -6,8 +6,9 @@ from pathlib import Path
 
 from sqlalchemy import Connection, Engine, inspect, text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from gander.errors import MigrationExecutionError, MigrationRollbackError, UnsupportedDialectError
+from gander.errors import MigrationExecutionError, MigrationRollbackError, TransactionStateError, UnsupportedDialectError
 from gander.migration import Migration, collect_migrations
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,40 @@ def migrate_down(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE)
         _migrate_down(connection, migrations, directory, table)
 
 
+async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) -> int:
+    """
+    Return the current migration version of the database behind an `AsyncEngine`.
+
+    Behaves as `get_version`, running it on one of the engine's connections.
+    """
+    async with engine.connect() as connection:
+        return await connection.run_sync(_get_version, table)
+
+
+async def migrate_up_async(engine: AsyncEngine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+    """
+    Apply every migration in `directory` newer than the newest version, over an `AsyncEngine`.
+
+    Behaves as `migrate_up`, transactions and errors included, running it on one of the
+    engine's connections.
+    """
+    migrations = collect_migrations(directory)
+    async with engine.connect() as connection:
+        await connection.run_sync(_migrate_up, migrations, table)
+
+
+async def migrate_down_async(engine: AsyncEngine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+    """
+    Roll back the migration of the current version with its Down section, over an `AsyncEngine`.
+
+    Behaves as `migrate_down`, transactions and errors included, running it on one of the
+    engine's connections.
+    """
+    migrations = collect_migrations(directory)
+    async with engine.connect() as connection:
+        await connection.run_sync(_migrate_down, migrations, directory, table)
+
+
 def _get_version(connection: Connection, table: str) -> int:
     _prepare_connection(connection)
     with _begin_transaction(connection):
@@ -113,6 +148,8 @@ def _migrate_down(connection: Connection, migrations: list[Migration], directory
 def _prepare_connection(connection: Connection) -> None:
     if connection.dialect.name != _SUPPORTED_DIALECT:
         raise UnsupportedDialectError(f"gander supports only SQLite databases, not {connection.dialect.name!r}")
+    if connection.in_transaction():
+        raise TransactionStateError("the connection already has a transaction begun; gander needs one with none, since it switches the connection to autocommit")
     # pysqlite's legacy mode opens a transaction only before DML, so DDL would autocommit; transactions
     # open with an explicit BEGIN instead. SQLAlchemy restores the isolation level on return to the pool.
     connection.execution_options(isolation_level="AUTOCOMMIT")
