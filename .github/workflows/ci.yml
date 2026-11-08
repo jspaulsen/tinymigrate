@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOOSE_VERSION: v3.28.0
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # The goose-compatibility tests skip without it, so CI would never run them.
+      - name: Install goose
+        run: |
+          curl -fsSL -o /usr/local/bin/goose "https://github.com/pressly/goose/releases/download/${GOOSE_VERSION}/goose_linux_x86_64"
+          chmod +x /usr/local/bin/goose
+          goose --version
+
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run ty check
+      - run: uv run pytest
