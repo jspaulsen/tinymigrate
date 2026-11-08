@@ -184,7 +184,8 @@ Every error gander raises subclasses `gander.GanderError`:
 | `TransactionStateError` | The connection gander checks out already has a transaction begun. |
 
 Errors creating or reading the version table outside a migration propagate as
-SQLAlchemy's own, and a missing migration directory raises `FileNotFoundError`.
+SQLAlchemy's own, and a missing or non-directory migration path raises `OSError`
+(`FileNotFoundError`, `NotADirectoryError`).
 
 ## Existing goose databases
 
@@ -258,12 +259,16 @@ To switch to gander:
        yield
    ```
 
-Code that calls `migrate(path)` synchronously, such as schema tooling and tests, can call
-`migrate_up(create_engine(f"sqlite:///{path}"), MIGRATIONS)` instead (the parent directory
-must exist). The goose binary is no longer needed in development or CI; remove the
-`skipif(shutil.which("goose") is None, ...)` markers from tests that only needed it to
-migrate, or they skip silently once goose is gone, and delete tests of goose-py's own
-errors (`GooseNotFoundError`). Both apps' `Database` turns
+Every other caller of `migrate` must change too: an `asyncio.to_thread(migrate, path)`
+elsewhere (hearth's eval CLI has one) would now return a coroutine that never runs, so it
+becomes `await migrate(database.engine)`, and sync callers such as schema tooling and tests
+can call `migrate_up(create_engine(f"sqlite:///{path}"), MIGRATIONS)` (the parent directory
+must exist).
+
+The goose binary is no longer needed in development or CI. Remove the
+`shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip markers from
+tests that only needed it to migrate, or they skip silently once goose is gone, and
+delete tests of goose-py's own errors (`GooseNotFoundError`). Both apps' `Database` turns
 `PRAGMA foreign_keys` on for every connection, so the caveat above applies to any
 migration that rebuilds a table.
 
