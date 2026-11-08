@@ -30,11 +30,12 @@ are ordinary comments to it.
   - `-- up` starts the up section (required, exactly once).
   - `-- down` starts the down section (optional, at most once, after `-- up`).
   - `-- no transaction`, anywhere before `-- up`, runs that file outside a transaction.
-  Any other comment is just a comment.
+  Any other comment is just a comment, except a leftover goose annotation (`-- +goose …`),
+  which is an error.
 - Only `--` comment lines and blank lines may come before `-- up`.
 - Statements are split by accumulating lines until `sqlite3.complete_statement` says the
   buffer is complete, so a trigger body (`BEGIN ... END;`) needs no marker. A section that
-  ends with an incomplete statement is an error. Comments and blank lines before a
+  ends with an incomplete statement, or a marker inside one, is an error. Comments before a
   statement belong to it; a comment-only remainder at the end of a section is dropped.
 - Malformed files raise `MigrationParseError` naming the file and line. Both directions
   are checked when a file is parsed.

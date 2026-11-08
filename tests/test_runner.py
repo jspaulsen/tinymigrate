@@ -542,6 +542,18 @@ def test_goose_also_fails_without_touching_the_database_on_a_directory_with_no_m
     assert not database.exists()
 
 
+@requires_goose
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_goose_also_fails_without_touching_the_database_on_a_missing_directory(tmp_path: Path, command: str) -> None:
+    database = tmp_path / "goose.db"
+
+    result = subprocess.run(["goose", "-dir", str(tmp_path / "nope"), "sqlite3", str(database), command], capture_output=True, text=True, check=False)
+
+    assert result.returncode != 0
+    assert "directory does not exist" in result.stderr
+    assert not database.exists()
+
+
 def test_a_failing_no_transaction_down_keeps_its_earlier_statements_and_the_version_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
     down = "-- down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\nDROP TABLE b;\n"

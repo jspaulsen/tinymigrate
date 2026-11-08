@@ -15,6 +15,11 @@ _MAX_VERSION = 2**63 - 1
 _UP_MARKER = "-- up"
 _DOWN_MARKER = "-- down"
 _NO_TRANSACTION_MARKER = "-- no transaction"
+_MARKERS = (_UP_MARKER, _DOWN_MARKER, _NO_TRANSACTION_MARKER)
+
+# How a goose annotation starts, after case-folding; one left in a file is refused, since as
+# a comment an unconverted `-- +goose Down` would put the down SQL in the up section.
+_GOOSE_ANNOTATION_PREFIX = "+goose"
 
 
 @dataclass(frozen=True)
@@ -41,7 +46,8 @@ def parse_migration(path: str | Path) -> Migration:
     A statement is the lines accumulated until `sqlite3.complete_statement` accepts them,
     so a trigger body's `;` does not end it; comment-only leftovers are dropped. Both
     directions are parsed, so a malformed down section raises too. Raises
-    `MigrationParseError` naming the file, and the line where there is one.
+    `MigrationParseError` naming the file, and the line where there is one, for a file
+    that cannot be read or breaks the format, a leftover goose annotation included.
     """
     path = Path(path)
     version, description = _parse_file_name(path)
@@ -50,11 +56,16 @@ def parse_migration(path: str | Path) -> Migration:
     current: list[str] | None = None
     use_transaction = True
     buffer: list[str] = []
-    buffer_line_number = 0
+    # The line of the buffer's first SQL, as opposed to comments; 0 while it holds none.
+    statement_line_number = 0
 
     for line_number, line in enumerate(_read_lines(path), start=1):
         stripped = line.strip()
         marker = stripped.casefold()
+        if marker.startswith("--") and marker.removeprefix("--").lstrip().startswith(_GOOSE_ANNOTATION_PREFIX):
+            raise MigrationParseError(f"{path}:{line_number}: goose annotation {stripped!r}, expected one of {', '.join(_MARKERS)}")
+        if marker in _MARKERS and statement_line_number:
+            raise MigrationParseError(f"{path}:{line_number}: {stripped!r} marker inside the statement that starts at line {statement_line_number}")
         if marker == _NO_TRANSACTION_MARKER:
             if current is not None:
                 raise MigrationParseError(f"{path}:{line_number}: '{_NO_TRANSACTION_MARKER}' marker after '{_UP_MARKER}'")
@@ -68,23 +79,24 @@ def parse_migration(path: str | Path) -> Migration:
                 raise MigrationParseError(f"{path}:{line_number}: '{_DOWN_MARKER}' marker before '{_UP_MARKER}'")
             if down_statements is not None:
                 raise MigrationParseError(f"{path}:{line_number}: duplicate '{_DOWN_MARKER}' marker")
-            _check_section_end(path, buffer, buffer_line_number)
             buffer = []
             down_statements = current = []
         elif current is None:
             if stripped and not stripped.startswith("--"):
                 raise MigrationParseError(f"{path}:{line_number}: SQL before the '{_UP_MARKER}' marker")
         elif buffer or stripped:
-            if not buffer:
-                buffer_line_number = line_number
+            if not statement_line_number and stripped and not stripped.startswith("--"):
+                statement_line_number = line_number
             buffer.append(line)
             if sqlite3.complete_statement(statement := "\n".join(buffer)):
                 current.append(statement.strip())
                 buffer = []
+                statement_line_number = 0
 
     if up_statements is None:
         raise MigrationParseError(f"{path}: no '{_UP_MARKER}' marker")
-    _check_section_end(path, buffer, buffer_line_number)
+    if statement_line_number:
+        raise MigrationParseError(f"{path}:{statement_line_number}: incomplete statement, expected it to end with ';'")
 
     return Migration(
         version=version,
@@ -111,6 +123,8 @@ def collect_migrations(directory: str | Path) -> list[Migration]:
         raise MigrationParseError(f"migration directory {directory} does not exist") from error
     except NotADirectoryError as error:
         raise MigrationParseError(f"migration directory {directory} is not a directory") from error
+    except OSError as error:
+        raise MigrationParseError(f"cannot read the migration directory {directory}: {error.strerror}") from error
     if not paths:
         raise MigrationParseError(f"no migration files found in {directory}")
     migrations: dict[int, Migration] = {}
@@ -139,16 +153,14 @@ def _parse_file_name(path: Path) -> tuple[int, str]:
 def _read_lines(path: Path) -> list[str]:
     # Decoded by hand rather than with `read_text`, whose universal newlines would turn a
     # lone `\r` inside a string literal into `\n`; only the `\r` of a `\r\n` is dropped.
-    data = path.read_bytes()
     try:
-        text = data.decode("utf-8")
+        data = path.read_bytes()
+    except OSError as error:
+        raise MigrationParseError(f"{path}: cannot read the migration file: {error.strerror}") from error
+    try:
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         line_number = data.count(b"\n", 0, error.start) + 1
         raise MigrationParseError(f"{path}:{line_number}: not valid UTF-8 ({error.reason} at byte {error.start})") from error
 
     return [line.removesuffix("\r") for line in text.split("\n")]
-
-
-def _check_section_end(path: Path, buffer: list[str], buffer_line_number: int) -> None:
-    if any(line.strip() and not line.strip().startswith("--") for line in buffer):
-        raise MigrationParseError(f"{path}:{buffer_line_number}: incomplete statement, expected it to end with ';'")

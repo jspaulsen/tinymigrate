@@ -131,7 +131,7 @@ def test_markers_ignore_case_and_surrounding_whitespace(tmp_path: Path) -> None:
     assert not migration.use_transaction
 
 
-@pytest.mark.parametrize("comment", ["-- +goose Down", "-- up and down", "--down", "-- downgrade", "-- +goose StatementBegin"])
+@pytest.mark.parametrize("comment", ["-- up and down", "--down", "-- downgrade", "-- see +goose docs"])
 def test_any_other_comment_is_just_a_comment(tmp_path: Path, comment: str) -> None:
     path = _write_migration(tmp_path, "00001_x.sql", f"-- up\nSELECT 1;\n{comment}\nSELECT 2;\n")
 
@@ -145,6 +145,25 @@ def test_a_file_without_a_down_marker_has_no_down_section(tmp_path: Path) -> Non
     path = _write_migration(tmp_path, "00001_x.sql", "-- up\nSELECT 1;\n")
 
     assert parse_migration(path).down_statements is None
+
+
+def test_an_empty_up_section_has_no_statements(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- up\n-- down\nSELECT 1;\n")
+
+    assert parse_migration(path).up_statements == ()
+
+
+def test_a_utf8_byte_order_mark_is_ignored(tmp_path: Path) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "\ufeff-- up\nSELECT 1;\n")
+
+    assert parse_migration(path).up_statements == ("SELECT 1;",)
+
+
+def test_parsing_a_missing_file_raises_naming_it(tmp_path: Path) -> None:
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql: cannot read the migration file") as raised:
+        parse_migration(tmp_path / "00001_x.sql")
+
+    assert isinstance(raised.value.__cause__, FileNotFoundError)
 
 
 def test_an_empty_down_section_has_no_statements(tmp_path: Path) -> None:
@@ -171,7 +190,15 @@ def test_no_transaction_before_the_up_marker_turns_the_transaction_off(tmp_path:
         ("-- up\n-- down\n-- down\n", r"00001_x\.sql:3: duplicate '-- down' marker"),
         ("-- up\n-- no transaction\n", r"00001_x\.sql:2: '-- no transaction' marker after '-- up'"),
         ("-- up\nSELECT 1\n", r"00001_x\.sql:2: incomplete statement"),
-        ("-- up\n\nSELECT 1\n-- down\n", r"00001_x\.sql:3: incomplete statement"),
+        ("-- up\n\nSELECT 1\n-- down\n", r"00001_x\.sql:4: '-- down' marker inside the statement that starts at line 3"),
+        ("-- up\nSELECT 'a\n-- down\nb';\n", r"00001_x\.sql:3: '-- down' marker inside the statement that starts at line 2"),
+        ("-- up\nCREATE TRIGGER t BEFORE DELETE ON a\nBEGIN\n    SELECT 1;\n  -- UP\nEND;\n", r"00001_x\.sql:5: '-- UP' marker inside the statement that starts at line 2"),
+        ("-- up\n-- down\n-- no transaction\n", r"00001_x\.sql:3: '-- no transaction' marker after '-- up'"),
+        ("-- up\nSELECT 1;\n/* c */\n", r"00001_x\.sql:3: incomplete statement"),
+        ("-- up\nSELECT 1;\n-- create b\nCREATE TABLE b (\n", r"00001_x\.sql:4: incomplete statement"),
+        ("-- +goose Up\nSELECT 1;\n", r"00001_x\.sql:1: goose annotation '-- \+goose Up', expected one of -- up, -- down, -- no transaction"),
+        ("-- up\nSELECT 1;\n  --  +GOOSE Down \nDROP TABLE a;\n", r"00001_x\.sql:3: goose annotation '--  \+GOOSE Down'"),
+        ("-- up\n-- +goose StatementBegin\n", r"00001_x\.sql:2: goose annotation"),
         ("-- up\nSELECT 1;\n-- down\nSELECT 2\n", r"00001_x\.sql:4: incomplete statement"),
         ("-- up\nSELECT 'a;\n", r"00001_x\.sql:2: incomplete statement"),
         ("-- up\nCREATE TRIGGER t BEFORE DELETE ON a\nBEGIN\n    SELECT 1;\n", r"00001_x\.sql:2: incomplete statement"),

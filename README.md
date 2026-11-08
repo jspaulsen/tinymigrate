@@ -67,10 +67,12 @@ DROP TABLE users;
 - `-- no transaction`, anywhere before `-- up`, runs that file outside a transaction (see
   below).
 - A marker is a whole line, case-insensitive, with surrounding whitespace ignored. Any
-  other comment, `-- +goose Up` included, is just a comment.
+  other comment is just a comment, except a leftover goose annotation (`-- +goose Up`),
+  which is an error.
 - A statement is the lines up to the one that completes it, as `sqlite3.complete_statement`
   decides, so a `;` inside a string literal or a trigger body does not end it. Comments
-  before a statement go with it; a section ending in an incomplete statement is an error.
+  before a statement go with it; a section ending in an incomplete statement, or a marker
+  inside one, is an error.
 
 Every file in the directory is parsed, both directions, before gander touches the
 database, so a malformed file raises `MigrationParseError` naming the file and line and
@@ -224,7 +226,6 @@ Where gander differs from goose:
   skipped silently; goose's `up` reports it as missing.
 - `get_version` returns 0 when no row is applied, where goose errors.
 
-
 ## Replacing goose-py
 
 simulacra and hearth call goose-py from a blocking `migrate`, which their FastAPI lifespan
@@ -249,8 +250,11 @@ To switch to gander:
        -e '/^-- +goose Statement\(Begin\|End\)$/d' src/<app>/migrations/*.sql
    ```
 
-   Then check that no `+goose` is left (`grep -n +goose src/<app>/migrations/*.sql`) and
-   that `collect_migrations` parses the directory. goose can no longer read the files.
+   That is GNU sed (on macOS, `gsed`), and it matches only annotations spelled exactly so;
+   goose also accepted other cases and trailing whitespace. `collect_migrations` raises on
+   any `+goose` left, naming its line, so run it over the directory and fix what it reports.
+   A `-- +goose NO TRANSACTION` below `-- +goose Up` must move above `-- up`. goose can no
+   longer read the files.
 3. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
    creates no directories, and SQLite cannot create a database file in a missing one.
 
@@ -307,7 +311,7 @@ To switch to gander:
      `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
      `docs/decisions.md`), and text calling the files goose migrations.
 
-gander has no `create` command, and goose's writes goose annotations, so a new migration
+gander has no `create` command, and goose's `create` writes goose annotations, so a new migration
 is written by hand: the next version, zero-padded to five digits as before
 (`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's README
 and CLAUDE.md to say so.
