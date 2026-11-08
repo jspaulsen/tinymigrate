@@ -1,6 +1,6 @@
 [project]
 name = "gander"
-version = "0.0.0"
+version = "0.1.0"
 description = "Apply goose-compatible SQL migration files through SQLAlchemy, without the goose binary"
 readme = "README.md"
 authors = [

@@ -706,11 +706,17 @@ async def test_a_no_transaction_migration_over_aiosqlite_runs_in_autocommit_and_
     assert _read_version_rows(database_path) == [(0, 1), (1, 1), (2, 1)]
 
 
-async def test_an_async_connection_that_already_began_a_transaction_raises(async_engine: AsyncEngine) -> None:
+async def test_an_async_connection_that_already_began_a_transaction_raises(async_engine: AsyncEngine, database_path: Path) -> None:
     event.listen(async_engine.sync_engine, "engine_connect", _begin_on_connect)
 
     with pytest.raises(TransactionStateError, match="already has a transaction begun"):
         await get_version_async(async_engine)
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        await migrate_up_async(async_engine, SIMULACRA_DIRECTORY)
+    with pytest.raises(TransactionStateError, match="already has a transaction begun"):
+        await migrate_down_async(async_engine, SIMULACRA_DIRECTORY)
+
+    assert _read_table_names(database_path) == set()
 
 
 class Character(SQLModel, table=True):
