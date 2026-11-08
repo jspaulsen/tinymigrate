@@ -12,7 +12,7 @@ from gander import GanderError, Migration, MigrationParseError, collect_migratio
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 
 # (file name, up statement count, down statement count) for every fixture file; matches what
-# goose v3.28.0 executes, which `test_statements_match_what_goose_executes` checks.
+# goose v3.28.0 executes, which `test_fixture_statements_match_what_goose_executes` checks.
 HEARTH_STATEMENT_COUNTS = [
     ("00001_create_chat_log.sql", 7, 5),
     ("00002_add_card_fields_and_import.sql", 21, 5),
@@ -37,8 +37,10 @@ END;"""
 
 
 # Lines goose's splitter treats specially: a trailing comment, a `;` glued to a comment, a `;`
-# mid-line, a whitespace-only line pulling the next comment into a statement, comments inside
-# statements, and a block in the Down section. Every statement is valid SQLite so goose runs it.
+# mid-line, a whitespace-only line opening a statement, comments inside statements, and a block
+# in the Down section. Every statement is valid SQLite so goose runs it. The cross-check sees
+# goose's log, which drops `--` and empty lines, so it pins where statements split, not that
+# text; the whitespace-only line is spelled `\x20` so an editor trimming trailing spaces keeps it.
 GOOSE_SPLIT_EDGE_CASES = """-- leading comment
 -- +goose Up
 CREATE TABLE a (x INTEGER);  -- trailing comment
@@ -48,7 +50,7 @@ CREATE TABLE c (x INTEGER); CREATE TABLE d (
 
     x INTEGER
 );
-   
+\x20\x20\x20
 -- pulled into the next statement
 CREATE TABLE e (x INTEGER);
 
@@ -237,7 +239,7 @@ def test_a_malformed_file_raises_naming_the_file_and_line(tmp_path: Path, text: 
 
 
 @pytest.mark.parametrize("name", ["foo.sql", "2.sql", "0_zero.sql", "+3_plus.sql", "1a_x.sql", "9223372036854775808_too_big.sql"])
-def test_a_file_name_without_a_positive_numeric_prefix_raises(tmp_path: Path, name: str) -> None:
+def test_a_file_name_without_a_valid_version_raises(tmp_path: Path, name: str) -> None:
     path = _write_migration(tmp_path, name, "-- +goose Up\nSELECT 1;\n")
 
     with pytest.raises(MigrationParseError, match=name.replace("+", r"\+")):
@@ -281,7 +283,7 @@ def test_a_whitespace_only_line_makes_the_comment_after_it_part_of_the_next_stat
 def test_a_comment_after_a_whitespace_only_line_at_the_end_is_an_unterminated_statement(tmp_path: Path) -> None:
     path = _write_migration(tmp_path, "00001_x.sql", "-- +goose Up\nSELECT 1;\n  \n-- trailing comment\n")
 
-    with pytest.raises(MigrationParseError, match=r"00001_x\.sql:3: statement has no terminating ';'"):
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql:4: statement has no terminating ';'"):
         parse_migration(path)
 
 
@@ -310,7 +312,7 @@ def test_a_file_that_is_not_utf8_raises_naming_the_file(tmp_path: Path) -> None:
     path = tmp_path / "00001_x.sql"
     path.write_bytes(NON_UTF8_MIGRATION)
 
-    with pytest.raises(MigrationParseError, match=r"00001_x\.sql: not valid UTF-8"):
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql:2: not valid UTF-8"):
         parse_migration(path)
 
 
@@ -321,16 +323,7 @@ def test_collecting_ignores_a_subdirectory_named_like_a_migration(tmp_path: Path
     assert [migration.version for migration in collect_migrations(tmp_path)] == [1]
 
 
-@pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")
-@pytest.mark.parametrize("directory_name", ["hearth", "simulacra", "edge_cases"])
-def test_statements_match_what_goose_executes(tmp_path: Path, directory_name: str) -> None:
-    if directory_name == "edge_cases":
-        directory = tmp_path / "migrations"
-        directory.mkdir()
-        _write_migration(directory, "00001_edge_cases.sql", GOOSE_SPLIT_EDGE_CASES)
-    else:
-        directory = FIXTURE_DIRECTORY / directory_name
-    database = tmp_path / "goose.db"
+def _assert_statements_match_goose(directory: Path, database: Path) -> None:
     migrations = collect_migrations(directory)
 
     goose_up_statements = _run_goose(directory, database, "up")
@@ -338,3 +331,18 @@ def test_statements_match_what_goose_executes(tmp_path: Path, directory_name: st
 
     assert goose_up_statements == [_clear_statement(statement) for migration in migrations for statement in migration.up_statements]
     assert goose_down_statements == [_clear_statement(statement) for migration in reversed(migrations) for statement in migration.down_statements or ()]
+
+
+@pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")
+@pytest.mark.parametrize("directory_name", ["hearth", "simulacra"])
+def test_fixture_statements_match_what_goose_executes(tmp_path: Path, directory_name: str) -> None:
+    _assert_statements_match_goose(FIXTURE_DIRECTORY / directory_name, tmp_path / "goose.db")
+
+
+@pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")
+def test_edge_case_statements_match_what_goose_executes(tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    directory.mkdir()
+    _write_migration(directory, "00001_edge_cases.sql", GOOSE_SPLIT_EDGE_CASES)
+
+    _assert_statements_match_goose(directory, tmp_path / "goose.db")

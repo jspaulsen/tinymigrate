@@ -22,4 +22,5 @@
    (`+3_x.sql`) is rejected; `ENVSUB ON`/`OFF` is rejected rather than honoured, since running
    unsubstituted SQL would be wrong; two files with one version raise instead of goose's panic; a
    non-UTF-8 file raises; a subdirectory named like a migration is skipped where goose errors. An
-   empty StatementBegin/End block yields no statement, where goose silently drops the next SQL line.
+   StatementBegin/End block holding nothing or only blank lines yields no statement, where goose
+   sends an empty one (or, for a block with nothing in it, silently drops the next SQL line).

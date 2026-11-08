@@ -105,7 +105,8 @@ def parse_migration(path: Path) -> Migration:
             continue
         if current is None:
             raise MigrationParseError(f"{path}:{line_number}: SQL before the '-- +goose Up' annotation")
-        if not buffer:
+        # A whitespace-only line can open the buffer; errors name the first line with text.
+        if stripped and not any(part.strip() for part in buffer):
             buffer_line_number = line_number
         buffer.append(line)
         if not in_block and _ends_statement(line):
@@ -161,10 +162,12 @@ def _parse_file_name(path: Path) -> tuple[int, str]:
 def _read_lines(path: Path) -> list[str]:
     # Decoded by hand rather than with `read_text`, whose universal newlines would turn a
     # lone `\r` inside a string literal into `\n`; goose only drops the `\r` of a `\r\n`.
+    data = path.read_bytes()
     try:
-        text = path.read_bytes().decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError as error:
-        raise MigrationParseError(f"{path}: not valid UTF-8 ({error})") from error
+        line_number = data.count(b"\n", 0, error.start) + 1
+        raise MigrationParseError(f"{path}:{line_number}: not valid UTF-8 ({error.reason} at byte {error.start})") from error
     return [line.removesuffix("\r") for line in text.split("\n")]
 
 
