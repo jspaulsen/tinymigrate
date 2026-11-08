@@ -51,6 +51,7 @@ def _write_migration(directory: Path, name: str, text: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
     path.write_text(text, encoding="utf-8")
+
     return path
 
 
@@ -78,6 +79,7 @@ def _copy_first_migrations(source: Path, destination: Path, count: int) -> Path:
     destination.mkdir()
     for path in sorted(source.glob("*.sql"))[:count]:
         shutil.copy(path, destination / path.name)
+
     return destination
 
 

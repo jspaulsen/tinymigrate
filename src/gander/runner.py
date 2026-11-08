@@ -19,8 +19,7 @@ DEFAULT_TABLE = "goose_db_version"
 _SUPPORTED_DIALECT = "sqlite"
 
 # goose v3.28.0's sqlite3 version table DDL, whitespace included, so `sqlite_master` holds
-# the same text whichever tool created the table. The table name is interpolated unquoted,
-# as goose does, so a name goose accepts produces the same text.
+# the same text whichever tool created the table. `{table}` goes in unquoted, as in goose.
 _CREATE_VERSION_TABLE = """CREATE TABLE {table} (
 \t\tid INTEGER PRIMARY KEY AUTOINCREMENT,
 \t\tversion_id INTEGER NOT NULL,
@@ -81,9 +80,8 @@ def _migrate_up(connection: Connection, migrations: list[Migration], table: str)
 def _prepare_connection(connection: Connection) -> None:
     if connection.dialect.name != _SUPPORTED_DIALECT:
         raise UnsupportedDialectError(f"gander supports only SQLite databases, not {connection.dialect.name!r}")
-    # pysqlite's legacy mode opens a transaction only before DML, so DDL would autocommit.
-    # The driver goes to autocommit and transactions open with an explicit BEGIN instead;
-    # SQLAlchemy restores the isolation level when the connection returns to the pool.
+    # pysqlite's legacy mode opens a transaction only before DML, so DDL would autocommit; transactions
+    # open with an explicit BEGIN instead. SQLAlchemy restores the isolation level on return to the pool.
     connection.execution_options(isolation_level="AUTOCOMMIT")
 
 
@@ -111,9 +109,8 @@ def _run_migration(connection: Connection, migration: Migration, statements: tup
 
 
 def _split_statement(statement: str) -> list[str]:
-    # goose's splitter can leave several SQL statements in one string (`a; b;` on a line),
-    # which goose's driver runs and Python's sqlite3 refuses; SQLite's own completeness
-    # check splits them without breaking on a `;` inside a literal, comment or trigger.
+    # goose's splitter can leave several SQL statements in one string (`a; b;`), which Python's sqlite3
+    # refuses; SQLite's completeness check splits them without breaking a literal, comment or trigger.
     sql_statements: list[str] = []
     pending = ""
     *parts, remainder = statement.split(";")
