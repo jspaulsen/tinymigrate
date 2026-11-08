@@ -6,7 +6,6 @@
 - `migrate_up_to(version)` / `migrate_down_to(version)`, `status` listing.
 - Out-of-order / missing-migration detection (`allow_missing`).
 - Locking for concurrent migrators.
-- Replace goose-py with tinymigrate in simulacra and hearth.
 - Turn `PRAGMA foreign_keys` off while migrating, so a
   table rebuild on an app engine with `foreign_keys=ON` cannot cascade.
 - Support engines using SQLAlchemy's pysqlite "emit BEGIN on begin" recipe.

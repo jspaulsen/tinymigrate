@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import ConnectionPoolEntry
 
 
-def _set_hearth_pragmas(dbapi_connection: DBAPIConnection, _connection_record: ConnectionPoolEntry) -> None:
+def _set_app_pragmas(dbapi_connection: DBAPIConnection, _connection_record: ConnectionPoolEntry) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -31,9 +31,9 @@ def engine(database_path: Path) -> Iterator[Engine]:
 @pytest.fixture
 async def async_engine(database_path: Path) -> AsyncIterator[AsyncEngine]:
     """
-    Yield an aiosqlite engine set up as hearth's `Database` sets up its own.
+    Yield an aiosqlite engine set up as a typical app sets up its own: WAL, foreign keys on and a busy timeout.
     """
     engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
-    event.listen(engine.sync_engine, "connect", _set_hearth_pragmas)
+    event.listen(engine.sync_engine, "connect", _set_app_pragmas)
     yield engine
     await engine.dispose()

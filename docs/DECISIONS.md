@@ -38,7 +38,7 @@
     SQLAlchemy resets it when the connection returns to the pool), sends `BEGIN` for a transactional
     file and lets SQLAlchemy's commit/rollback end it through the driver. `NO TRANSACTION` files skip
     the `BEGIN`, so each statement autocommits. Proven by tests that fail when either half is removed.
-    The app's connect-event PRAGMAs (hearth's `foreign_keys=ON`, `journal_mode=WAL`) stay in force
+    The app's connect-event PRAGMAs (such as `foreign_keys=ON`, `journal_mode=WAL`) stay in force
     while migrating, unlike goose, which opens its own connection without them; `PRAGMA
     foreign_keys` is a no-op inside a transaction, so a file that needs it off must be `NO
     TRANSACTION`. An engine using SQLAlchemy's pysqlite "begin event emits BEGIN" recipe would get
@@ -97,10 +97,10 @@
     in the annotation, since nothing passes one.
 19. **The README's goose-py recipe keeps the app's blocking `migrate(path)` and swaps only the goose
     call for `migrate_up` on a throwaway sync engine.** Its `mkdir`, its thread and all its callers
-    (lifespan, hearth's eval CLI, schema tooling, tests) stay as they are, and the engine has none of
+    (lifespan, CLIs, schema tooling, tests) stay as they are, and the engine has none of
     the app's PRAGMAs, as goose's own connection had none. The earlier recipe moved migrating onto the
-    app's `AsyncEngine`, which broke simulacra's parent-directory test and every `to_thread` caller.
-    Applied literally to a copy of simulacra with goose off `PATH`: suite, ruff and ty pass. The
+    app's `AsyncEngine`, which broke the app's parent-directory test and every `to_thread` caller.
+    Applied literally to a copy of a small SQLModel app with goose off `PATH`: suite, ruff and ty pass. The
     `migrate_up_async` route stays a one-paragraph alternative.
 20. **`Migration`, `parse_migration` and `collect_migrations` stay exported and are documented** in
     the README, for tooling that needs the migrations without a database (a schema snapshot, a CI
