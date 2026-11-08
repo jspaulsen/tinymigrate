@@ -1,0 +1,49 @@
+[project]
+name = "gander"
+version = "0.0.0"
+description = "Apply goose-compatible SQL migration files through SQLAlchemy, without the goose binary"
+readme = "README.md"
+authors = [
+    { name = "jspaulsen", email = "jpaulsen.dev@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = ["sqlalchemy>=2"]
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 180
+
+[tool.ruff.format]
+# Ruff's default, kept explicit: a trailing comma means "leave this exploded".
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint]
+# Both `"""` get a line to themselves: D213 puts the summary on the second line, D209
+# keeps the closing quotes on their own. D200 is deliberately absent — it wants a short
+# docstring collapsed back onto one line.
+select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM", "D205", "D209", "D213"]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "ruff>=0.17.4",
+    "sqlmodel>=0.0.48",
+    "ty>=0.0.99",
+]
