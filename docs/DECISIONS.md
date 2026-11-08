@@ -64,3 +64,5 @@
     no `-- +goose Down` like an empty Down section (logs `EMPTY` and deletes the row, leaving the
     schema); gander raises instead, per SPEC, since silently keeping the schema while dropping the
     row is rarely what a rollback wants. An empty Down section is still a no-op rollback, as in goose.
+    Every file in the directory is parsed before rolling back, as for `up`, so a malformed older file
+    blocks gander's `down` where goose's CLI parses only the current version's file.

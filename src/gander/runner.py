@@ -60,12 +60,14 @@ def migrate_down(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE)
     """
     Roll back the migration of the current version with its Down section.
 
-    The current version is the one `get_version` returns. Its Down statements run in one
+    The current version is the one `get_version` returns, and as there the version table is
+    created when it does not exist, even when the rollback then raises. Its Down statements run in one
     transaction together with deleting every version-table row for it, so a failing one
     leaves the schema and the rows as they were; a `NO TRANSACTION` file runs statement by
     statement in autocommit. Raises `MigrationRollbackError` when the database is at version
     0, when `directory` has no file for the current version or that file has no Down
-    section, `MigrationParseError` before touching the database when a file is malformed,
+    section, `MigrationParseError` before touching the database when any file in `directory`
+    is malformed,
     `MigrationExecutionError` naming the file when the database rejects it, and
     `UnsupportedDialectError` for a database other than SQLite.
     """

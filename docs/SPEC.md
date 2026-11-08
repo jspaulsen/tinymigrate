@@ -75,7 +75,8 @@ against the real goose binary (v3.28.0 is installed) rather than from memory.
   raise; an empty Down section only deletes the rows.
 - `version`: the current version as goose computes it: walking rows newest first, the first
   version whose newest row has `is_applied = 1` (0 for a fresh database).
-- Errors are subclasses of one package base exception and name the migration file.
+- Errors are subclasses of one package base exception and name the migration file where
+  there is one.
 
 ## Out of scope for the MVP
 

@@ -102,6 +102,16 @@ def test_the_version_table_name_is_a_parameter(engine: Engine, database_path: Pa
     assert VERSION_TABLE not in _read_table_names(database_path)
 
 
+def test_migrate_down_uses_the_version_table_name_it_is_given(engine: Engine, database_path: Path) -> None:
+    migrate_up(engine, SIMULACRA_DIRECTORY, table="schema_version")
+
+    migrate_down(engine, SIMULACRA_DIRECTORY, table="schema_version")
+
+    assert get_version(engine, table="schema_version") == SIMULACRA_LATEST_VERSION - 1
+    assert _read_version_rows(database_path, "schema_version") == [(0, 1), (1, 1), (2, 1), (3, 1)]
+    assert VERSION_TABLE not in _read_table_names(database_path)
+
+
 def test_migrate_up_applies_every_migration_and_records_each_version(engine: Engine, database_path: Path) -> None:
     migrate_up(engine, SIMULACRA_DIRECTORY)
 
@@ -546,3 +556,20 @@ def test_goose_down_rolls_back_the_same_version_as_migrate_down_when_a_row_is_no
 
     assert _read_schema(database_path) == _read_schema(goose_database)
     assert _read_version_rows(database_path) == _read_version_rows(goose_database)
+
+
+@requires_goose
+def test_goose_down_also_fails_and_changes_nothing_where_migrate_down_raises(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    partial_directory = _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", 2)
+    fresh_database = tmp_path / "fresh.db"
+    migrated_database = tmp_path / "migrated.db"
+    migrate_up(engine, SIMULACRA_DIRECTORY)
+    shutil.copy(database_path, migrated_database)
+
+    for directory, database in [(SIMULACRA_DIRECTORY, fresh_database), (partial_directory, migrated_database)]:
+        command = ["goose", "-dir", str(directory), "sqlite3", str(database), "down"]
+        assert subprocess.run(command, capture_output=True, text=True, check=False).returncode != 0
+
+    assert _read_version_rows(fresh_database) == [(0, 1)]
+    assert _read_schema(migrated_database) == _read_schema(database_path)
+    assert _read_version_rows(migrated_database) == _read_version_rows(database_path)
