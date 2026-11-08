@@ -3,7 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from gander.errors import MigrationParseError
+from tinymigrate.errors import MigrationParseError
 
 # A file name is a version, `_`, then a description; `2.sql` and a signed `+3_x.sql` are rejected.
 _FILE_NAME_PATTERN = re.compile(r"(?P<version>[0-9]+)_(?P<description>.*)\.sql")

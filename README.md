@@ -1,11 +1,11 @@
-# gander
+# tinymigrate
 
 Apply SQL migration files through SQLAlchemy, keeping
 [goose](https://github.com/pressly/goose)'s version table, without the goose binary.
 
-gander is plain Python on top of SQLAlchemy 2.x, so it works with SQLModel apps, sync or
+tinymigrate is plain Python on top of SQLAlchemy 2.x, so it works with SQLModel apps, sync or
 async. Its migration files use a small syntax of its own (below), and it keeps goose's
-`goose_db_version` table, so a database goose migrated is continued by gander. There is no
+`goose_db_version` table, so a database goose migrated is continued by tinymigrate. There is no
 subprocess, no `GOOSE_*` environment variable and no `.env` lookup: the engine, the
 directory and the table name are all passed explicitly.
 
@@ -14,27 +14,26 @@ out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
 
 ## Install
 
-gander is not on PyPI. Install it from GitHub, pinned to a release tag:
+tinymigrate is not on PyPI. Install it from GitHub, pinned to a release tag:
 
 ```sh
-uv add git+https://github.com/jspaulsen/gander --tag v0.1.1
+uv add git+https://github.com/jspaulsen/tinymigrate --tag v0.1.1
 ```
 
-which records it in `pyproject.toml` as below (`uv add "gander @ git+https://github.com/jspaulsen/gander@v0.1.1"`
+which records it in `pyproject.toml` as below (`uv add "tinymigrate @ git+https://github.com/jspaulsen/tinymigrate@v0.1.1"`
 works too, and records `rev = "v0.1.1"` instead of `tag`):
 
 ```toml
 [project]
-dependencies = ["gander"]
+dependencies = ["tinymigrate"]
 
 [tool.uv.sources]
-gander = { git = "https://github.com/jspaulsen/gander", tag = "v0.1.1" }
+tinymigrate = { git = "https://github.com/jspaulsen/tinymigrate", tag = "v0.1.1" }
 ```
 
 It depends on `sqlalchemy[asyncio]>=2` and Python 3.12+. No database driver comes with
 it: the sync functions use the standard library's `sqlite3`, and the async ones need
-whatever async driver your engine uses (e.g. `aiosqlite` for `sqlite+aiosqlite`). While
-the repository is private, installing needs git credentials for it.
+whatever async driver your engine uses (e.g. `aiosqlite` for `sqlite+aiosqlite`).
 
 ## Migration files
 
@@ -74,7 +73,7 @@ DROP TABLE users;
   before a statement go with it; a section ending in an incomplete statement, or a marker
   inside one, is an error.
 
-Every file in the directory is parsed, both directions, before gander touches the
+Every file in the directory is parsed, both directions, before tinymigrate touches the
 database, so a malformed file raises `MigrationParseError` naming the file and line and
 nothing runs. [`docs/SPEC.md`](docs/SPEC.md) has the full rules.
 
@@ -88,7 +87,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 
-from gander import get_version, migrate_down, migrate_up
+from tinymigrate import get_version, migrate_down, migrate_up
 
 engine = create_engine("sqlite:///app.db")
 migrations = Path("migrations")
@@ -109,8 +108,8 @@ print(get_version(engine))  # 0
 
 All three create the version table, with goose's seed row for version 0, when it does not
 exist. Each takes a keyword-only `table=` for a version table other than
-`goose_db_version`. gander logs `applied migration <file>` and
-`rolled back migration <file>` at INFO on the `gander.runner` logger.
+`goose_db_version`. tinymigrate logs `applied migration <file>` and
+`rolled back migration <file>` at INFO on the `tinymigrate.runner` logger.
 
 ### Async
 
@@ -126,7 +125,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from gander import migrate_up_async
+from tinymigrate import migrate_up_async
 
 MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 
@@ -163,7 +162,7 @@ schema snapshot:
   with nothing under it), and `use_transaction`, `False` for a `-- no transaction` file.
 
 ```python
-from gander import collect_migrations
+from tinymigrate import collect_migrations
 
 migrations = collect_migrations("migrations")
 assert all(migration.down_statements is not None for migration in migrations)
@@ -174,14 +173,14 @@ assert all(migration.down_statements is not None for migration in migrations)
 Each migration file runs in its own transaction together with its version-table insert
 (or, for `migrate_down`, the delete). A failing migration leaves no partial schema and no
 version row; the migrations before it in the same `migrate_up` stay applied. DDL is
-transactional too: gander puts the connection in autocommit and issues `BEGIN` itself,
+transactional too: tinymigrate puts the connection in autocommit and issues `BEGIN` itself,
 because Python's `sqlite3` would otherwise commit each `CREATE` or `ALTER` on its own.
 
 A `-- no transaction` file runs statement by statement in autocommit, for SQL that
 SQLite refuses inside a transaction, such as `VACUUM`. If one of its statements fails,
 the statements before it stay applied and no version row is written.
 
-**`PRAGMA foreign_keys`.** gander migrates on the connection your engine gives it, so the
+**`PRAGMA foreign_keys`.** tinymigrate migrates on the connection your engine gives it, so the
 engine's connect-event PRAGMAs stay in force while migrating. goose opens a connection of
 its own, without them. With `PRAGMA foreign_keys=ON`, a table rebuild (create a new
 table, copy, drop the old one, rename) fires the old table's `ON DELETE` actions and
@@ -190,22 +189,22 @@ foreign-key checks, which can delete or reject rows. SQLite ignores
 a `-- no transaction` file (turning it back on at the end), or the migrations must run on an
 engine without that PRAGMA.
 
-gander also needs a connection with no transaction begun. An `engine_connect` listener
+tinymigrate also needs a connection with no transaction begun. An `engine_connect` listener
 that runs a statement, or an engine built with SQLAlchemy's pysqlite "emit BEGIN"
 recipe or with `connect_args={"autocommit": False}`, does not work: the first raises
 `TransactionStateError`, the other two SQLAlchemy's `OperationalError` from a nested `BEGIN`.
 
 ## Errors
 
-Every error gander raises subclasses `gander.GanderError`:
+Every error tinymigrate raises subclasses `tinymigrate.TinymigrateError`:
 
 | Error | Raised when |
 | --- | --- |
-| `MigrationParseError` | A file name or file does not follow gander's format, two files share a version, or the directory is missing, not a directory or has no `.sql` file. Names the file, and the line where there is one, or the directory. Nothing has run. |
+| `MigrationParseError` | A file name or file does not follow tinymigrate's format, two files share a version, or the directory is missing, not a directory or has no `.sql` file. Names the file, and the line where there is one, or the directory. Nothing has run. |
 | `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file, and the failing SQL when a statement failed; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
 | `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- down` section. |
 | `UnsupportedDialectError` | The engine is for a database other than SQLite. |
-| `TransactionStateError` | The connection gander checks out already has a transaction begun. |
+| `TransactionStateError` | The connection tinymigrate checks out already has a transaction begun. |
 
 Errors creating or reading the version table outside a migration propagate as
 SQLAlchemy's own.
@@ -213,12 +212,12 @@ SQLAlchemy's own.
 ## Existing goose databases
 
 The version table has goose v3's shape for sqlite3, created with goose's DDL text, and
-gander reads and writes it by goose's rules. A database goose migrated is picked up where
-goose left off, and the goose CLI reads the version of a database gander migrated.
+tinymigrate reads and writes it by goose's rules. A database goose migrated is picked up where
+goose left off, and the goose CLI reads the version of a database tinymigrate migrated.
 Switching an app over needs no change to the database; the migration files are converted
 once (below), after which goose can no longer read them.
 
-Where gander differs from goose:
+Where tinymigrate differs from goose:
 
 - `migrate_down` raises on a file with no down section; goose deletes the version row and
   leaves the schema.
@@ -237,11 +236,11 @@ def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
     Goose("sqlite3", str(path), str(migrations), table="goose_db_version").up()
 ```
 
-To switch to gander:
+To switch to tinymigrate:
 
 1. Replace the dependency: `uv remove goose-py`, then the `uv add` above. The database
    stays as it is.
-2. Convert the migration files to gander's syntax, in place: each annotation becomes its
+2. Convert the migration files to tinymigrate's syntax, in place: each annotation becomes its
    marker, and StatementBegin/End lines go, since a trigger body needs no marker.
 
    ```sh
@@ -256,14 +255,14 @@ To switch to gander:
    fix what it reports.
    A `-- +goose NO TRANSACTION` below `-- +goose Up` must move above `-- up`. goose can no
    longer read the files.
-3. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
+3. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: tinymigrate
    creates no directories, and SQLite cannot create a database file in a missing one.
 
    ```python
    from pathlib import Path
 
-   from gander import migrate_up
    from sqlalchemy import create_engine
+   from tinymigrate import migrate_up
 
    # Inside the package, so the wheel ships them and they resolve the same from a source tree.
    MIGRATIONS = Path(__file__).resolve().parent / "migrations"
@@ -284,7 +283,7 @@ To switch to gander:
    ```
 
    hearth's `migrate(path)` takes no `migrations=` and passes `MIGRATIONS` directly; keep
-   that. In the app, `gander` is a third-party package like `sqlalchemy`, so its import goes in
+   that. In the app, `tinymigrate` is a third-party package like `sqlalchemy`, so its import goes in
    the same block, sorted alphabetically, or ruff's isort (`I001`) fails. Every caller of
    `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, hearth's
    eval CLI, schema tooling and tests. The engine is a plain one without the app's
@@ -294,7 +293,7 @@ To switch to gander:
    - Tests of goose-py itself: the `GooseNotFoundError` test
      (`test_migrate_raises_without_goose`) and the `GOOSE_TABLE` one
      (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
-     gander reads no environment variable. The `pytest` import they used goes too.
+     tinymigrate reads no environment variable. The `pytest` import they used goes too.
    - Every `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip on
      a test that only needed goose to migrate, with the `os`/`shutil` imports it used and
      `pytest` where nothing else uses it, or those tests skip silently once goose is gone.
@@ -312,7 +311,7 @@ To switch to gander:
      `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
      `docs/decisions.md`), and text calling the files goose migrations.
 
-gander has no `create` command, and goose's `create` writes goose annotations, so a new
+tinymigrate has no `create` command, and goose's `create` writes goose annotations, so a new
 migration is written by hand: the next version, zero-padded to five digits as before
 (`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's
 README and CLAUDE.md to say so.

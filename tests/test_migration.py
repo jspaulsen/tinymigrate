@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 
-import gander
-from gander import GanderError, Migration, MigrationParseError, collect_migrations, parse_migration
+import tinymigrate
+from tinymigrate import Migration, MigrationParseError, TinymigrateError, collect_migrations, parse_migration
 
-# The real migration directories gander replaces goose-py in, copied from hearth and simulacra.
+# The real migration directories tinymigrate replaces goose-py in, copied from hearth and simulacra.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 
 # (file name, up statement count, down statement count) for every fixture file, as the
-# files ran under goose before they were converted to gander's syntax.
+# files ran under goose before they were converted to tinymigrate's syntax.
 HEARTH_STATEMENT_COUNTS = [
     ("00001_create_chat_log.sql", 7, 5),
     ("00002_add_card_fields_and_import.sql", 21, 5),
@@ -45,10 +45,10 @@ def _write_migration(directory: Path, name: str, text: str) -> Path:
 
 
 def test_the_parser_names_are_importable_from_the_package_root() -> None:
-    assert gander.Migration is Migration
-    assert gander.parse_migration is parse_migration
-    assert gander.collect_migrations is collect_migrations
-    assert issubclass(gander.MigrationParseError, GanderError)
+    assert tinymigrate.Migration is Migration
+    assert tinymigrate.parse_migration is parse_migration
+    assert tinymigrate.collect_migrations is collect_migrations
+    assert issubclass(tinymigrate.MigrationParseError, TinymigrateError)
 
 
 @pytest.mark.parametrize(("name", "up_count", "down_count"), HEARTH_STATEMENT_COUNTS)

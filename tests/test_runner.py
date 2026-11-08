@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-import gander
-from gander import (
-    GanderError,
+import tinymigrate
+from tinymigrate import (
     MigrationExecutionError,
     MigrationParseError,
     MigrationRollbackError,
+    TinymigrateError,
     TransactionStateError,
     UnsupportedDialectError,
     get_version,
@@ -30,7 +30,7 @@ from gander import (
     migrate_up_async,
 )
 
-# The real migration directories gander replaces goose-py in, copied from hearth and simulacra.
+# The real migration directories tinymigrate replaces goose-py in, copied from hearth and simulacra.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 HEARTH_DIRECTORY = FIXTURE_DIRECTORY / "hearth"
 SIMULACRA_DIRECTORY = FIXTURE_DIRECTORY / "simulacra"
@@ -39,7 +39,7 @@ SIMULACRA_DIRECTORY = FIXTURE_DIRECTORY / "simulacra"
 HEARTH_LATEST_VERSION = 7
 SIMULACRA_LATEST_VERSION = 4
 
-# goose's default version table name, which gander also defaults to.
+# goose's default version table name, which tinymigrate also defaults to.
 VERSION_TABLE = "goose_db_version"
 
 # The DDL goose v3.28.0 writes for its sqlite3 version table, copied from `sqlite_master`
@@ -56,7 +56,7 @@ requires_goose = pytest.mark.skipif(shutil.which("goose") is None, reason="goose
 
 class _OtherDialect(SQLiteDialect_pysqlite):
     """
-    A pysqlite dialect under another name, standing in for a database gander does not support.
+    A pysqlite dialect under another name, standing in for a database tinymigrate does not support.
     """
 
     name = "otherdb"
@@ -102,10 +102,10 @@ def _copy_first_migrations(source: Path, destination: Path, count: int) -> Path:
 
 
 def test_the_runner_names_are_importable_from_the_package_root() -> None:
-    assert {"get_version", "migrate_up", "migrate_down", "MigrationExecutionError", "MigrationRollbackError", "UnsupportedDialectError"} <= set(gander.__all__)
-    assert issubclass(MigrationExecutionError, GanderError)
-    assert issubclass(MigrationRollbackError, GanderError)
-    assert issubclass(UnsupportedDialectError, GanderError)
+    assert {"get_version", "migrate_up", "migrate_down", "MigrationExecutionError", "MigrationRollbackError", "UnsupportedDialectError"} <= set(tinymigrate.__all__)
+    assert issubclass(MigrationExecutionError, TinymigrateError)
+    assert issubclass(MigrationRollbackError, TinymigrateError)
+    assert issubclass(UnsupportedDialectError, TinymigrateError)
 
 
 def test_a_fresh_database_is_at_version_zero_with_goose_seed_row(engine: Engine, database_path: Path) -> None:

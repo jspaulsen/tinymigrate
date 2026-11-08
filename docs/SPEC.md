@@ -1,4 +1,4 @@
-# gander — spec
+# tinymigrate — spec
 
 A small, pure-Python library that applies SQL migration files to a database through
 SQLAlchemy (and so SQLModel). It replaces goose-py in small apps like simulacra and hearth,
@@ -8,17 +8,17 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 
 1. **No binary.** Plain Python on top of SQLAlchemy 2.x. No subprocess, no `GOOSE_*`
    environment variables, no `.env` lookup. Everything is passed explicitly.
-2. **Simple migration files.** gander's own small syntax (below); an app's goose files
+2. **Simple migration files.** tinymigrate's own small syntax (below); an app's goose files
    need their annotations rewritten once.
 3. **goose-compatible version table.** A database already migrated by goose (table
    `goose_db_version`) is picked up where goose left off, and goose can read a database
-   gander migrated. Apps switch over without touching their databases.
+   tinymigrate migrated. Apps switch over without touching their databases.
 4. **Works with SQLModel apps**, sync or async: takes a SQLAlchemy `Engine`, and an
    `AsyncEngine` (e.g. `sqlite+aiosqlite`) through an async entry point.
 
 ## Migration files
 
-gander's own syntax, not goose's: goose annotations (`-- +goose Up`, `StatementBegin`/`End`)
+tinymigrate's own syntax, not goose's: goose annotations (`-- +goose Up`, `StatementBegin`/`End`)
 are ordinary comments to it.
 
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
@@ -82,6 +82,6 @@ migrations, locking. See `docs/FUTURE.md`.
 
 ## Done when
 
-simulacra's and hearth's migration directories, converted to gander's syntax, apply
-cleanly; a database migrated by goose is continued by gander, and goose reads the version
-gander leaves; the package installs from a GitHub tag the way goose-py does.
+simulacra's and hearth's migration directories, converted to tinymigrate's syntax, apply
+cleanly; a database migrated by goose is continued by tinymigrate, and goose reads the version
+tinymigrate leaves; the package installs from a GitHub tag the way goose-py does.
