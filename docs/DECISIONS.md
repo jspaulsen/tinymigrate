@@ -12,3 +12,15 @@
 6. **Install from GitHub tags, not PyPI**, as goose-py does.
 7. **Public functions are `migrate_up`, `migrate_down`, `get_version`** (+ `_async` variants) rather
    than goose's bare `up`/`down`, per the user's naming rules.
+8. **Statements are split exactly as goose v3.28.0's `internal/sqlparser` splits them**, checked
+   against the binary: a statement ends at a line whose last word before a `--` comment ends in
+   `;`, so a `;` mid-line does not split. goose's sqlite driver runs a multi-statement string
+   that Python's `sqlite3` refuses; the executor has to deal with that, not the parser.
+9. **Deliberate divergences from goose's parser**, each checked against the binary: both
+   directions are parsed and checked up front (as goose's Provider does; its CLI parses only the
+   direction it runs, so `goose up` ignores an unterminated Down statement); a signed version
+   (`+3_x.sql`) is rejected; `ENVSUB ON`/`OFF` is rejected rather than honoured, since running
+   unsubstituted SQL would be wrong; two files with one version raise instead of goose's panic; a
+   non-UTF-8 file raises; a subdirectory named like a migration is skipped where goose errors. An
+   StatementBegin/End block holding nothing or only blank lines yields no statement, where goose
+   sends an empty one (or, for a block with nothing in it, silently drops the next SQL line).

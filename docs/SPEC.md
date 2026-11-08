@@ -19,20 +19,29 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 ## Migration files
 
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
-  `<version>` is a positive integer (`00001_create_chat_log.sql`). Files are ordered by
-  the integer, not the string. Files not ending in `.sql` are ignored. Two files with the
-  same version, or a `.sql` file without a numeric prefix, are an error.
+  `<version>` is a positive integer that fits in 64 bits (`00001_create_chat_log.sql`).
+  Files are ordered by the integer, not the string. Files not ending in `.sql` are
+  ignored. Two files with the same version, or a `.sql` file without a numeric prefix,
+  are an error.
 - Annotations, as in goose:
   - `-- +goose Up` starts the up section (required, exactly once).
   - `-- +goose Down` starts the down section (optional).
   - `-- +goose StatementBegin` / `-- +goose StatementEnd` wrap one statement that
     contains semicolons (e.g. a trigger body); it is sent as a single statement.
   - `-- +goose NO TRANSACTION` runs that file outside a transaction.
-- Outside a StatementBegin/End block, statements end at a line whose trimmed text ends
-  in `;`. Comment-only and blank lines between statements are dropped. Text before
-  `-- +goose Up` is ignored (simulacra's `00001_init.sql` has a leading comment).
-- Malformed files (no Up, unterminated StatementBegin, trailing statement without `;`)
-  raise a clear error naming the file and line.
+  - Annotations are matched as goose v3.28.0 matches them: a line starting with `--`
+    that contains a lowercase `+goose`; the annotation word is case-insensitive and
+    surrounding whitespace is ignored. An indented annotation, or an unknown one
+    (including goose's `ENVSUB ON`/`OFF`), is an error.
+- Outside a StatementBegin/End block, a statement ends at a line whose last word before
+  any `--` comment ends in `;` (so `x; -- note` ends one, `x;--note` and a `;` mid-line
+  do not). Comment-only and blank lines between statements are dropped; inside a
+  statement they are kept, and, as in goose, a whitespace-only line starts a statement.
+  Comments and blank lines before `-- +goose Up` are ignored (simulacra's
+  `00001_init.sql` has a leading comment); SQL there is an error.
+- Malformed files (no Up, duplicate Up or Down, unterminated StatementBegin, trailing
+  statement without `;`) raise a clear error naming the file and line. Both directions
+  are checked when a file is parsed.
 
 ## Version table
 
