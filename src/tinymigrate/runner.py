@@ -8,8 +8,8 @@ from sqlalchemy import Connection, Engine, inspect, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from gander.errors import MigrationExecutionError, MigrationRollbackError, TransactionStateError, UnsupportedDialectError
-from gander.migration import Migration, collect_migrations
+from tinymigrate.errors import MigrationExecutionError, MigrationRollbackError, TransactionStateError, UnsupportedDialectError
+from tinymigrate.migration import Migration, collect_migrations
 
 logger = logging.getLogger(__name__)
 
@@ -151,10 +151,10 @@ def _migrate_down(connection: Connection, migrations: list[Migration], directory
 
 def _prepare_connection(connection: Connection) -> None:
     if connection.dialect.name != _SUPPORTED_DIALECT:
-        raise UnsupportedDialectError(f"gander supports only SQLite databases, not {connection.dialect.name!r}")
+        raise UnsupportedDialectError(f"tinymigrate supports only SQLite databases, not {connection.dialect.name!r}")
     if connection.in_transaction():
         raise TransactionStateError(
-            "the connection already has a transaction begun (did an engine_connect listener run a statement?); gander switches it to autocommit, so it needs one with none"
+            "the connection already has a transaction begun (did an engine_connect listener run a statement?); tinymigrate switches it to autocommit, so it needs one with none"
         )
     # pysqlite's legacy mode opens a transaction only before DML, so DDL would autocommit; transactions
     # open with an explicit BEGIN instead. SQLAlchemy restores the isolation level on return to the pool.

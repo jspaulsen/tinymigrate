@@ -1,15 +1,15 @@
 # Decisions
 
-1. **Name: `gander`.** A male goose; signals goose-compatible files without claiming to be goose.
+1. *(Superseded by 23.)* **Name: `gander`.** A male goose; signals goose-compatible files without claiming to be goose.
 2. **Pure Python over SQLAlchemy, no goose binary.** The point of the package versus goose-py.
 3. **SQLite only for the MVP.** Both target apps are SQLite. Statement execution goes through
    SQLAlchemy so other dialects are mostly a version-table DDL question; see FUTURE.md.
 4. **Version table matches goose v3's `goose_db_version`.** Existing app databases keep working
    and the user can still point the goose CLI at them.
-5. **Private GitHub repo `jspaulsen/gander` for now.** goose-py is public, but creating a public
-   repo was blocked in this session; private is the easier-to-undo choice. Making it public
-   lets apps install from a git tag without credentials. Tracked as a `decision` issue.
-6. **Install from GitHub tags, not PyPI**, as goose-py does.
+5. **Public GitHub repo `jspaulsen/tinymigrate`**, so apps install from a git tag without
+   credentials, as goose-py does. It started private (creating a public repo was blocked at
+   first) and was made public at the user's request.
+6. **Install from GitHub tags, not PyPI**, as goose-py does. No PyPI release is planned.
 7. **Public functions are `migrate_up`, `migrate_down`, `get_version`** (+ `_async` variants) rather
    than goose's bare `up`/`down`, per the user's naming rules.
 8. *(Superseded by 21.)* **Statements were split exactly as goose v3.28.0's `internal/sqlparser` splits them**, checked
@@ -32,8 +32,8 @@
     newer than `MAX(version_id)`, applied or not, as goose's `up` does. goose's missing-migration
     error (a file older than that maximum with no row) is not reproduced: such a file is skipped
     silently (SPEC: out of scope; FUTURE.md).
-11. **Transactions: the driver goes to autocommit and gander issues `BEGIN` itself.** pysqlite's
-    legacy mode begins a transaction only before DML, so DDL would autocommit. `gander` sets
+11. **Transactions: the driver goes to autocommit and tinymigrate issues `BEGIN` itself.** pysqlite's
+    legacy mode begins a transaction only before DML, so DDL would autocommit. `tinymigrate` sets
     `isolation_level="AUTOCOMMIT"` on the one `Connection` it checks out (not on the engine;
     SQLAlchemy resets it when the connection returns to the pool), sends `BEGIN` for a transactional
     file and lets SQLAlchemy's commit/rollback end it through the driver. `NO TRANSACTION` files skip
@@ -44,7 +44,7 @@
     TRANSACTION`. An engine using SQLAlchemy's pysqlite "begin event emits BEGIN" recipe would get
     a nested `BEGIN` and fail, as would one created with Python 3.12's `connect_args={"autocommit":
     False}`; neither app uses either. The table name is interpolated unquoted, as goose does.
-12. **One parsed statement may hold several SQL statements; gander splits it with
+12. **One parsed statement may hold several SQL statements; tinymigrate splits it with
     `sqlite3.complete_statement`** at each `;` (since 21, this happens only when one line holds
     more than one, `a; b;`), which respects literals, comments and trigger bodies,
     and runs the pieces one by one inside the same transaction, as goose's driver runs them all.
@@ -55,7 +55,7 @@
     The async entry points can then run the same code with `AsyncConnection.run_sync`. The SQLite
     check reads `connection.dialect.name` and raises `UnsupportedDialectError`.
     The `Connection` must have no transaction begun, since its isolation level is changed;
-    otherwise gander raises `TransactionStateError` rather than letting SQLAlchemy's
+    otherwise tinymigrate raises `TransactionStateError` rather than letting SQLAlchemy's
     `InvalidRequestError` through. The public functions always check out their own connection, so
     this fires only when something on the engine begins one first (an `engine_connect` listener
     that runs a statement).
@@ -67,12 +67,12 @@
     whose newest row is unapplied is passed over) and deletes every row with that `version_id`
     (goose's `DELETE ... WHERE version_id=?`), including duplicates. At version 0, or when the
     directory has no file for the current version, goose errors and changes nothing beyond creating
-    its version table; gander raises `MigrationRollbackError` the same way. goose treats a file with
+    its version table; tinymigrate raises `MigrationRollbackError` the same way. goose treats a file with
     no `-- +goose Down` like an empty Down section (logs `EMPTY` and deletes the row, leaving the
-    schema); gander raises instead, per SPEC, since silently keeping the schema while dropping the
+    schema); tinymigrate raises instead, per SPEC, since silently keeping the schema while dropping the
     row is rarely what a rollback wants. An empty Down section is still a no-op rollback, as in goose.
     Every file in the directory is parsed before rolling back, as for `up`, so a malformed older file
-    blocks gander's `down` where goose's CLI parses only the current version's file.
+    blocks tinymigrate's `down` where goose's CLI parses only the current version's file.
 16. **The async entry points are thin wrappers: each opens one `AsyncConnection` and hands the
     sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of decision
     11 is the same over aiosqlite (whose adapter maps `AUTOCOMMIT` and commit/rollback onto
@@ -105,7 +105,7 @@
 20. **`Migration`, `parse_migration` and `collect_migrations` stay exported and are documented** in
     the README, for tooling that needs the migrations without a database (a schema snapshot, a CI
     check of the directory).
-21. **gander has its own migration syntax, not goose's** (supersedes 8 and 9). The user never
+21. **tinymigrate has its own migration syntax, not goose's** (supersedes 8 and 9). The user never
     meant to match goose's parser, and porting it meant porting its quirks (a `;` mid-line not
     splitting, a whitespace-only line pulling comments into a statement, annotation edge
     cases). Markers are whole lines, `-- up`, `-- down` and `-- no transaction`,
@@ -123,13 +123,18 @@
     part of it, and an incomplete one is reported at its first SQL line. An unreadable file
     raises `MigrationParseError`; a UTF-8 byte-order mark is skipped. The file-name rules, the
     64-bit version limit, the UTF-8 check and keeping a lone `\r` are unchanged. goose can no
-    longer read gander's files, so the tests that cross-checked parsing or file-driven runs
-    against the goose binary are gone; the version-table checks against goose stay until gander
+    longer read tinymigrate's files, so the tests that cross-checked parsing or file-driven runs
+    against the goose binary are gone; the version-table checks against goose stay until tinymigrate
     owns that table too.
 22. **A missing or non-directory migration path raises `MigrationParseError` naming it**, with
     the `OSError` as `__cause__`, rather than a bare `FileNotFoundError`/`NotADirectoryError`,
-    so every error gander raises is a `GanderError`. goose v3.28.0's `up` and `down` also fail
+    so every error tinymigrate raises is a `TinymigrateError`. goose v3.28.0's `up` and `down` also fail
     on a missing one (`nope directory does not exist`) without creating the database, which a
     test checks against the binary (goose reports a file path as `no migration files found`);
-    gander, which parses before connecting, does not touch the database either. It reuses
+    tinymigrate, which parses before connecting, does not touch the database either. It reuses
     `MigrationParseError`, as 17 does for an empty directory.
+23. **Name: `tinymigrate`** (supersedes 1). The user renamed the project from `gander`: the
+    package, the base error (`GanderError` became `TinymigrateError`) and the GitHub repo
+    (`jspaulsen/gander` became `jspaulsen/tinymigrate`, which GitHub redirects). The rename
+    changes no behaviour. The tags `v0.1.0` and `v0.1.1` stay as they were, so they still
+    install a package named `gander`.

@@ -30,7 +30,7 @@ wheels = [
 ]
 
 [[package]]
-name = "gander"
+name = "tinymigrate"
 version = "0.1.1"
 source = { editable = "." }
 dependencies = [
