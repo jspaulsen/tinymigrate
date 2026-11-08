@@ -61,20 +61,20 @@ def parse_migration(path: str | Path) -> Migration:
 
     for line_number, line in enumerate(_read_lines(path), start=1):
         stripped = line.strip()
-        marker = stripped.casefold()
-        if marker.startswith("--") and marker.removeprefix("--").lstrip().startswith(_GOOSE_ANNOTATION_PREFIX):
+        folded = stripped.casefold()
+        if folded.startswith("--") and folded.removeprefix("--").lstrip().startswith(_GOOSE_ANNOTATION_PREFIX):
             raise MigrationParseError(f"{path}:{line_number}: goose annotation {stripped!r}, expected one of {', '.join(_MARKERS)}")
-        if marker in _MARKERS and statement_line_number:
+        if folded in _MARKERS and statement_line_number:
             raise MigrationParseError(f"{path}:{line_number}: {stripped!r} marker inside the statement that starts at line {statement_line_number}")
-        if marker == _NO_TRANSACTION_MARKER:
+        if folded == _NO_TRANSACTION_MARKER:
             if current is not None:
                 raise MigrationParseError(f"{path}:{line_number}: '{_NO_TRANSACTION_MARKER}' marker after '{_UP_MARKER}'")
             use_transaction = False
-        elif marker == _UP_MARKER:
+        elif folded == _UP_MARKER:
             if current is not None:
                 raise MigrationParseError(f"{path}:{line_number}: duplicate '{_UP_MARKER}' marker")
             up_statements = current = []
-        elif marker == _DOWN_MARKER:
+        elif folded == _DOWN_MARKER:
             if current is None:
                 raise MigrationParseError(f"{path}:{line_number}: '{_DOWN_MARKER}' marker before '{_UP_MARKER}'")
             if down_statements is not None:

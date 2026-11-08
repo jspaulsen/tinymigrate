@@ -185,7 +185,7 @@ def _run_migration(connection: Connection, migration: Migration, statements: tup
 
 
 def _split_statement(statement: str) -> list[str]:
-    # A parsed statement ends at a line, so one line can leave several in one string (`a; b;`), which Python's sqlite3
+    # A parsed statement ends at the end of a line, so it can hold several (`a; b;`), which Python's sqlite3
     # refuses; SQLite's completeness check splits them without breaking a literal, comment or trigger.
     sql_statements: list[str] = []
     pending = ""
