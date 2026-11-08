@@ -46,8 +46,8 @@ deliberately invalid code (a negative test), always with a comment saying why.
   `tests/conftest.py`. Fakes, not mocks; no `unittest.mock`. Assert with plain `assert`,
   `pytest.raises(..., match=...)` for errors.
 - **Where behaviour must match goose, check it against the real `goose` binary, not from
-  memory.** v3.28.0 is installed locally at `/home/linuxbrew/.linuxbrew/bin/goose`, and CI
-  installs the same version. Tests that run goose skip when it is absent:
+  memory.** Use v3.28.0 on `PATH` (on the maintainer's machine,
+  `/home/linuxbrew/.linuxbrew/bin/goose`); CI installs the same version. Tests that run goose skip when it is absent:
   `pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")`.
 
 ## Naming
