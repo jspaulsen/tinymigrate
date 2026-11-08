@@ -19,7 +19,8 @@ DEFAULT_TABLE = "goose_db_version"
 _SUPPORTED_DIALECT = "sqlite"
 
 # goose v3.28.0's sqlite3 version table DDL, whitespace included, so `sqlite_master` holds
-# the same text whichever tool created the table.
+# the same text whichever tool created the table. The table name is interpolated unquoted,
+# as goose does, so a name goose accepts produces the same text.
 _CREATE_VERSION_TABLE = """CREATE TABLE {table} (
 \t\tid INTEGER PRIMARY KEY AUTOINCREMENT,
 \t\tversion_id INTEGER NOT NULL,
@@ -128,24 +129,20 @@ def _split_statement(statement: str) -> list[str]:
     return sql_statements
 
 
-def _quote_table(connection: Connection, table: str) -> str:
-    return connection.dialect.identifier_preparer.quote(table)
-
-
 def _ensure_version_table(connection: Connection, table: str) -> None:
     if inspect(connection).has_table(table):
         return
-    connection.exec_driver_sql(_CREATE_VERSION_TABLE.format(table=_quote_table(connection, table)))
+    connection.exec_driver_sql(_CREATE_VERSION_TABLE.format(table=table))
     _insert_version(connection, table, 0)
 
 
 def _insert_version(connection: Connection, table: str, version: int) -> None:
-    connection.execute(text(f"INSERT INTO {_quote_table(connection, table)} (version_id, is_applied) VALUES (:version, 1)"), {"version": version})
+    connection.execute(text(f"INSERT INTO {table} (version_id, is_applied) VALUES (:version, 1)"), {"version": version})
 
 
 def _read_version(connection: Connection, table: str) -> int:
     # goose's rule: walking rows newest first, the first version whose newest row is applied.
-    rows = connection.execute(text(f"SELECT version_id, is_applied FROM {_quote_table(connection, table)} ORDER BY id DESC"))
+    rows = connection.execute(text(f"SELECT version_id, is_applied FROM {table} ORDER BY id DESC"))
     not_applied: set[int] = set()
     for version, is_applied in rows:
         if version in not_applied:
@@ -158,4 +155,4 @@ def _read_version(connection: Connection, table: str) -> int:
 
 
 def _read_max_version(connection: Connection, table: str) -> int:
-    return connection.execute(text(f"SELECT MAX(version_id) FROM {_quote_table(connection, table)}")).scalar_one() or 0
+    return connection.execute(text(f"SELECT MAX(version_id) FROM {table}")).scalar_one() or 0

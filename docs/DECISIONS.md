@@ -42,7 +42,8 @@
     while migrating, unlike goose, which opens its own connection without them; `PRAGMA
     foreign_keys` is a no-op inside a transaction, so a file that needs it off must be `NO
     TRANSACTION`. An engine using SQLAlchemy's pysqlite "begin event emits BEGIN" recipe would get
-    a nested `BEGIN` and fail; neither app uses it.
+    a nested `BEGIN` and fail, as would one created with Python 3.12's `connect_args={"autocommit":
+    False}`; neither app uses either. The table name is interpolated unquoted, as goose does.
 12. **One parsed statement may hold several SQL statements; gander splits it with
     `sqlite3.complete_statement`** at each `;`, which respects literals, comments and trigger bodies,
     and runs the pieces one by one inside the same transaction, as goose's driver runs them all.
@@ -50,6 +51,7 @@
 13. **Internal functions take a `Connection`; the public ones take an `Engine` and check one out.**
     The async entry points can then run the same code with `AsyncConnection.run_sync`. The SQLite
     check reads `connection.dialect.name` and raises `UnsupportedDialectError`.
+    The `Connection` must be fresh (no transaction begun), since its isolation level is changed.
 14. **`MigrationExecutionError` names the file and the failing SQL**, with SQLAlchemy's `DBAPIError`
     as `__cause__` (its `.orig` is the driver's exception), so sync and async drivers look the same.
     Errors creating or reading the version table outside a migration propagate as SQLAlchemy's.

@@ -203,7 +203,8 @@ def test_a_failure_in_the_second_of_two_sql_statements_rolls_back_the_first(engi
 def test_a_trigger_body_with_semicolons_runs_as_one_statement(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
     trigger = "CREATE TRIGGER t AFTER INSERT ON a BEGIN\n    INSERT INTO b VALUES (new.x);\n    INSERT INTO b VALUES (new.x);\nEND;\n"
-    migration_text = f"-- +goose Up\nCREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n-- +goose StatementBegin\n{trigger}-- +goose StatementEnd\nINSERT INTO a VALUES (1);\n"
+    tables = "CREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n"
+    migration_text = f"-- +goose Up\n{tables}-- +goose StatementBegin\n{trigger}-- +goose StatementEnd\nINSERT INTO a VALUES (1);\n"
     _write_migration(directory, "00001_x.sql", migration_text)
 
     migrate_up(engine, directory)
@@ -271,6 +272,32 @@ def test_a_database_other_than_sqlite_raises(tmp_path: Path) -> None:
             get_version(engine)
     finally:
         engine.dispose()
+
+
+def test_a_failing_commit_rolls_back_its_migration(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    migration_text = "-- +goose Up\nPRAGMA defer_foreign_keys = ON;\nCREATE TABLE a (x INTEGER REFERENCES a (y), y INTEGER UNIQUE);\nINSERT INTO a VALUES (1, NULL);\n"
+    _write_migration(directory, "00001_x.sql", migration_text)
+    event.listen(engine, "connect", lambda dbapi_connection, _record: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
+
+    with pytest.raises(MigrationExecutionError, match=r"00001_x\.sql: failed to record version 1 or commit: FOREIGN KEY constraint failed"):
+        migrate_up(engine, directory)
+
+    assert "a" not in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1)]
+
+
+def test_a_missing_migration_older_than_the_largest_version_is_skipped(engine: Engine, database_path: Path, tmp_path: Path) -> None:
+    directory = tmp_path / "migrations"
+    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00003_c.sql", "-- +goose Up\nCREATE TABLE c (x INTEGER);\n")
+    migrate_up(engine, directory)
+    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n")
+
+    migrate_up(engine, directory)
+
+    assert "b" not in _read_table_names(database_path)
+    assert _read_version_rows(database_path) == [(0, 1), (1, 1), (3, 1)]
 
 
 def test_get_version_ignores_a_version_whose_newest_row_is_not_applied(engine: Engine, database_path: Path) -> None:
