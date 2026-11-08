@@ -41,7 +41,7 @@ the repository is private, installing needs git credentials for it.
 One file per migration in a flat directory, named `<version>_<description>.sql`, where
 `<version>` is a positive integer (`00001_create_users.sql`). Files are ordered by the
 integer, not the string. Files not ending in `.sql`, and subdirectories, are ignored; two
-files with the same version, or a `.sql` file without a numeric prefix, are an error.
+files with the same version, or a `.sql` file not named that way, are an error.
 
 ```sql
 -- +goose Up
@@ -168,7 +168,8 @@ engine without that PRAGMA.
 
 gander also needs a connection with no transaction begun. An `engine_connect` listener
 that runs a statement, or an engine built with SQLAlchemy's pysqlite "emit BEGIN"
-recipe or with `connect_args={"autocommit": False}`, does not work.
+recipe or with `connect_args={"autocommit": False}`, does not work: the first raises
+`TransactionStateError`, the other two SQLAlchemy's `OperationalError` from a nested `BEGIN`.
 
 ## Errors
 
@@ -177,13 +178,13 @@ Every error gander raises subclasses `gander.GanderError`:
 | Error | Raised when |
 | --- | --- |
 | `MigrationParseError` | A file name or file does not follow goose's format, or two files share a version. Names the file, and the line where there is one. Nothing has run. |
-| `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file and the failing SQL; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
+| `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file, and the failing SQL when a statement failed; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
 | `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- +goose Down` section. |
 | `UnsupportedDialectError` | The engine is for a database other than SQLite. |
 | `TransactionStateError` | The connection gander checks out already has a transaction begun. |
 
 Errors creating or reading the version table outside a migration propagate as
-SQLAlchemy's own.
+SQLAlchemy's own, and a missing migration directory raises `FileNotFoundError`.
 
 ## Existing goose databases
 
@@ -257,8 +258,12 @@ To switch to gander:
        yield
    ```
 
-The goose binary is no longer needed, in development, CI or the Docker image, and
-`GooseError` handling becomes `GanderError`. Both apps' `Database` turns
+Code that calls `migrate(path)` synchronously, such as schema tooling and tests, can call
+`migrate_up(create_engine(f"sqlite:///{path}"), MIGRATIONS)` instead (the parent directory
+must exist). The goose binary is no longer needed in development or CI; remove the
+`skipif(shutil.which("goose") is None, ...)` markers from tests that only needed it to
+migrate, or they skip silently once goose is gone, and delete tests of goose-py's own
+errors (`GooseNotFoundError`). Both apps' `Database` turns
 `PRAGMA foreign_keys` on for every connection, so the caveat above applies to any
 migration that rebuilds a table.
 
