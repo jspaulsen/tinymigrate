@@ -14,7 +14,7 @@ from tinymigrate.migration import Migration, collect_migrations
 
 logger = logging.getLogger(__name__)
 
-# The version table's name when the caller passes none.
+# Named after the package so it cannot collide with a table of the application it migrates.
 DEFAULT_TABLE = "tinymigrate_migration"
 
 # The SQLAlchemy dialect name of the only database the MVP supports.
@@ -77,7 +77,7 @@ def migrate_down(engine: Engine, directory: str | Path, *, table: str = DEFAULT_
 
 async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) -> int:
     """
-    Return the current migration version of the database behind an `AsyncEngine`, or 0 for a fresh one.
+    Return the newest applied migration version of the database behind an `AsyncEngine`, or 0 for a fresh one.
 
     Behaves as `get_version`, running it on one of the engine's connections.
     """
