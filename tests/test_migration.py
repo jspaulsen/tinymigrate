@@ -346,3 +346,19 @@ def test_edge_case_statements_match_what_goose_executes(tmp_path: Path) -> None:
     _write_migration(directory, "00001_edge_cases.sql", GOOSE_SPLIT_EDGE_CASES)
 
     _assert_statements_match_goose(directory, tmp_path / "goose.db")
+
+
+@pytest.mark.parametrize("names", [[], ["README.md"]], ids=["no_files", "no_sql_files"])
+def test_collecting_a_directory_with_no_migration_files_raises_naming_it(tmp_path: Path, names: list[str]) -> None:
+    for name in names:
+        _write_migration(tmp_path, name, "not a migration")
+
+    with pytest.raises(MigrationParseError, match=f"no migration files found in {re.escape(str(tmp_path))}"):
+        collect_migrations(tmp_path)
+
+
+def test_the_parser_accepts_a_str_path() -> None:
+    simulacra_directory = FIXTURE_DIRECTORY / "simulacra"
+
+    assert [migration.version for migration in collect_migrations(str(simulacra_directory))] == [1, 2, 3, 4]
+    assert parse_migration(str(simulacra_directory / "00001_init.sql")).path == simulacra_directory / "00001_init.sql"

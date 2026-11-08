@@ -40,7 +40,7 @@ class Migration:
     use_transaction: bool
 
 
-def parse_migration(path: Path) -> Migration:
+def parse_migration(path: str | Path) -> Migration:
     """
     Parse one goose-style SQL migration file.
 
@@ -49,6 +49,7 @@ def parse_migration(path: Path) -> Migration:
     one statement. Both directions are parsed, so a malformed Down section raises too.
     Raises `MigrationParseError` naming the file, and the line where there is one.
     """
+    path = Path(path)
     version, description = _parse_file_name(path)
     up_statements: list[str] = []
     down_statements: list[str] | None = None
@@ -130,14 +131,17 @@ def parse_migration(path: Path) -> Migration:
     )
 
 
-def collect_migrations(directory: Path) -> list[Migration]:
+def collect_migrations(directory: str | Path) -> list[Migration]:
     """
     Parse every `.sql` file in a directory, ordered by integer version.
 
     Other files and subdirectories are ignored. Raises `MigrationParseError` when a file
-    is malformed or two files share a version.
+    is malformed, two files share a version or, as goose does, there is no `.sql` file.
     """
+    directory = Path(directory)
     paths = sorted(path for path in directory.iterdir() if path.suffix == ".sql" and path.is_file())
+    if not paths:
+        raise MigrationParseError(f"no migration files found in {directory}")
     migrations: dict[int, Migration] = {}
     for path in paths:
         migration = parse_migration(path)

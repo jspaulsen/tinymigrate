@@ -21,8 +21,8 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
   `<version>` is a positive integer that fits in 64 bits (`00001_create_chat_log.sql`).
   Files are ordered by the integer, not the string. Files not ending in `.sql` are
-  ignored. Two files with the same version, or a `.sql` file without a numeric prefix,
-  are an error.
+  ignored. Two files with the same version, a `.sql` file without a numeric prefix, or,
+  as in goose, a directory with no `.sql` file, are an error.
 - Annotations, as in goose:
   - `-- +goose Up` starts the up section (required, exactly once).
   - `-- +goose Down` starts the down section (optional).
