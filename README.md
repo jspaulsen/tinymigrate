@@ -16,18 +16,18 @@ out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
 tinymigrate is not on PyPI. Install it from GitHub, pinned to a release tag:
 
 ```sh
-uv add git+https://github.com/jspaulsen/tinymigrate --tag v0.2.0
+uv add git+https://github.com/jspaulsen/tinymigrate --tag v0.2.1
 ```
 
-which records it in `pyproject.toml` as below (`uv add "tinymigrate @ git+https://github.com/jspaulsen/tinymigrate@v0.2.0"`
-works too, and records `rev = "v0.2.0"` instead of `tag`):
+which records it in `pyproject.toml` as below (`uv add "tinymigrate @ git+https://github.com/jspaulsen/tinymigrate@v0.2.1"`
+works too, and records `rev = "v0.2.1"` instead of `tag`):
 
 ```toml
 [project]
 dependencies = ["tinymigrate"]
 
 [tool.uv.sources]
-tinymigrate = { git = "https://github.com/jspaulsen/tinymigrate", tag = "v0.2.0" }
+tinymigrate = { git = "https://github.com/jspaulsen/tinymigrate", tag = "v0.2.1" }
 ```
 
 It depends on `sqlalchemy[asyncio]>=2` and Python 3.12+. No database driver comes with

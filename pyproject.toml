@@ -1,6 +1,6 @@
 [project]
 name = "tinymigrate"
-version = "0.2.0"
+version = "0.2.1"
 description = "Apply SQL migration files through SQLAlchemy, with a small file syntax and version table of its own"
 readme = "README.md"
 authors = [
