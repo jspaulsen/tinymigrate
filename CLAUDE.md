@@ -71,10 +71,10 @@ From `~/.claude/skills/style-pass/style-guide.md`; that file has the full guide.
   builtin generics. `Any` only as a commented last resort; prefer a `Protocol`.
 - **Data:** `@dataclass(frozen=True)` for value objects. A field gets a default only when
   the default means something.
-- **Errors:** every error tinymigrate raises subclasses `tinymigrate.TinymigrateError` (`errors.py`, small
-  docstring-only classes). Messages name what failed and what was expected, and name the
-  migration file and line where there is one. Catch specific exceptions; no broad
-  `except Exception`. `raise … from error` when translating. **No `assert` outside tests.**
+- **Errors:** every error tinymigrate raises subclasses `tinymigrate.TinymigrateError`
+  (`errors.py`, small docstring-only classes). Messages name what failed and what was
+  expected, and name the migration file and line where there is one. Catch specific
+  exceptions; no broad `except Exception`. `raise … from error` when translating. **No `assert` outside tests.**
 - **Logging:** stdlib `logging`, never loguru. `logger = logging.getLogger(__name__)` per
   module; never configure handlers in the library. Lazy `%` arguments, not f-strings;
   lowercase plain-sentence messages (`"applied migration %s"`).

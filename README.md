@@ -261,8 +261,8 @@ To switch to tinymigrate:
    ```python
    from pathlib import Path
 
-   from tinymigrate import migrate_up
    from sqlalchemy import create_engine
+   from tinymigrate import migrate_up
 
    # Inside the package, so the wheel ships them and they resolve the same from a source tree.
    MIGRATIONS = Path(__file__).resolve().parent / "migrations"
