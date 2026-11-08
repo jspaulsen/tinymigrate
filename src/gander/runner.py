@@ -77,7 +77,7 @@ def migrate_down(engine: Engine, directory: str | Path, *, table: str = DEFAULT_
     """
     migrations = collect_migrations(directory)
     with engine.connect() as connection:
-        _migrate_down(connection, migrations, Path(directory), table)
+        _migrate_down(connection, migrations, directory, table)
 
 
 async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) -> int:
@@ -111,7 +111,7 @@ async def migrate_down_async(engine: AsyncEngine, directory: str | Path, *, tabl
     """
     migrations = collect_migrations(directory)
     async with engine.connect() as connection:
-        await connection.run_sync(_migrate_down, migrations, Path(directory), table)
+        await connection.run_sync(_migrate_down, migrations, directory, table)
 
 
 def _get_version(connection: Connection, table: str) -> int:
@@ -135,7 +135,7 @@ def _migrate_up(connection: Connection, migrations: list[Migration], table: str)
         logger.info("applied migration %s", migration.path.name)
 
 
-def _migrate_down(connection: Connection, migrations: list[Migration], directory: Path, table: str) -> None:
+def _migrate_down(connection: Connection, migrations: list[Migration], directory: str | Path, table: str) -> None:
     current = _get_version(connection, table)
     if current == 0:
         raise MigrationRollbackError(f"no migration to roll back: the database is at version 0 in {table}")

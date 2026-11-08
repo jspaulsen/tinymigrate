@@ -1,7 +1,8 @@
+import asyncio
 import shutil
 import sqlite3
 import subprocess
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -598,9 +599,12 @@ def test_a_directory_with_no_migration_files_raises_without_touching_the_databas
 
 @requires_goose
 @pytest.mark.parametrize("command", ["up", "down"])
-def test_goose_also_fails_without_touching_the_database_on_a_directory_with_no_migration_files(tmp_path: Path, command: str) -> None:
+@pytest.mark.parametrize("names", [[], ["README.md"]])
+def test_goose_also_fails_without_touching_the_database_on_a_directory_with_no_migration_files(tmp_path: Path, command: str, names: list[str]) -> None:
     empty_directory = tmp_path / "empty"
     empty_directory.mkdir()
+    for name in names:
+        _write_migration(empty_directory, name, "not a migration")
     database = tmp_path / "goose.db"
 
     result = subprocess.run(["goose", "-dir", str(empty_directory), "sqlite3", str(database), command], capture_output=True, text=True, check=False)
@@ -805,3 +809,16 @@ async def test_the_async_functions_accept_a_str_directory(async_engine: AsyncEng
 
     await migrate_down_async(async_engine, str(SIMULACRA_DIRECTORY))
     assert await get_version_async(async_engine) == SIMULACRA_LATEST_VERSION - 1
+
+
+@pytest.mark.parametrize("migrate", [migrate_up_async, migrate_down_async])
+async def test_an_async_migration_on_a_directory_with_no_migration_files_raises_without_touching_the_database(
+    async_engine: AsyncEngine, database_path: Path, tmp_path: Path, migrate: Callable[[AsyncEngine, Path], Awaitable[None]]
+) -> None:
+    empty_directory = tmp_path / "empty"
+    empty_directory.mkdir()
+
+    with pytest.raises(MigrationParseError, match="no migration files found in .*empty"):
+        await migrate(async_engine, empty_directory)
+
+    assert not await asyncio.to_thread(database_path.exists)

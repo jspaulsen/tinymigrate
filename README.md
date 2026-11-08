@@ -158,10 +158,11 @@ schema snapshot:
   list of `Migration`, ordered by version. It raises `MigrationParseError` as
   `migrate_up` does, empty directory included.
 - `parse_migration(path)` parses one file into a `Migration`.
-- `Migration` is a frozen dataclass: `version`, `description` and `path` from the file
-  name, `up_statements` and `down_statements` as tuples of SQL strings split as goose
-  splits them (`down_statements` is `None` for a file with no `-- +goose Down`), and
-  `use_transaction`, `False` for a `NO TRANSACTION` file.
+- `Migration` is a frozen dataclass: the file's `path`, the `version` and `description`
+  from its name, `up_statements` and `down_statements` as tuples of SQL strings split as
+  goose splits them (`down_statements` is `None` for a file with no `-- +goose Down`, and
+  an empty tuple for one with nothing under it), and `use_transaction`, `False` for a
+  `NO TRANSACTION` file.
 
 ```python
 from gander import collect_migrations
@@ -202,7 +203,7 @@ Every error gander raises subclasses `gander.GanderError`:
 
 | Error | Raised when |
 | --- | --- |
-| `MigrationParseError` | A file name or file does not follow goose's format, two files share a version, or the directory has no `.sql` file. Names the file, and the line where there is one. Nothing has run. |
+| `MigrationParseError` | A file name or file does not follow goose's format, two files share a version, or the directory has no `.sql` file. Names the file, and the line where there is one, or the empty directory. Nothing has run. |
 | `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file, and the failing SQL when a statement failed; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
 | `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- +goose Down` section. |
 | `UnsupportedDialectError` | The engine is for a database other than SQLite. |
@@ -271,7 +272,8 @@ To switch to gander:
            engine.dispose()
    ```
 
-   In the app, `gander` is a third-party package like `sqlalchemy`, so its import goes in
+   hearth's `migrate(path)` takes no `migrations=` and passes `MIGRATIONS` directly; keep
+   that. In the app, `gander` is a third-party package like `sqlalchemy`, so its import goes in
    the same block, sorted alphabetically, or ruff's isort (`I001`) fails. Every caller of
    `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, hearth's
    eval CLI, schema tooling and tests. The engine is a plain one without the app's
@@ -282,15 +284,20 @@ To switch to gander:
      (`test_migrate_raises_without_goose`) and the `GOOSE_TABLE` one
      (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
      gander reads no environment variable. The `pytest` import they used goes too.
-   - The `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip in
-     simulacra's `tests/test_schema_sync.py`, with its imports, or the test skips silently
-     once goose is gone.
-   - CI's "Install goose" step and its `GOOSE_VERSION` env.
+   - Every `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip on
+     a test that only needed goose to migrate, with the `os`/`shutil` imports it used, or
+     those tests skip silently once goose is gone. simulacra has one, in
+     `tests/test_schema_sync.py`; hearth has a module-level `pytestmark` in
+     `test_migrate.py` and `test_lifespan.py`, the `needs_goose` decorator in
+     `test_eval_cli.py`, and the skip in `test_schema_sync.py`.
+   - A CI "Install goose" step and its `GOOSE_VERSION` env (simulacra's
+     `.github/workflows/ci.yml`).
    - Text naming goose-py or a required goose binary: `migrate`'s old docstring ("goose
      runs as a subprocess", "Raises goose-py's `GooseError`"), the `GooseNotFoundError`
-     line in `generate_schema_sql`'s docstring, CLAUDE.md's "goose-py's subprocess"
-     example of a blocking call, and the README and CLAUDE.md lines saying the app needs
-     goose on `PATH` or `GOOSE_BINARY` to start.
+     line in simulacra's `generate_schema_sql` docstring, simulacra's CLAUDE.md
+     "goose-py's subprocess" example of a blocking call, and any README, CLAUDE.md or
+     decisions text saying the app needs goose on `PATH` or `GOOSE_BINARY` (simulacra's
+     README and CLAUDE.md; hearth's README and `docs/decisions.md`).
 
 The goose binary is still needed to create a migration: gander has no `create` command,
 so `goose -dir src/<app>/migrations -s create <name> sql` keeps working only with goose
