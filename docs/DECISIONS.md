@@ -55,3 +55,12 @@
 14. **`MigrationExecutionError` names the file and the failing SQL**, with SQLAlchemy's `DBAPIError`
     as `__cause__` (its `.orig` is the driver's exception), so sync and async drivers look the same.
     Errors creating or reading the version table outside a migration propagate as SQLAlchemy's.
+15. **`migrate_down` follows goose v3.28.0's `down`, checked against its source and binary, except
+    for a file with no Down section.** It rolls back the version `get_version` returns (so a version
+    whose newest row is unapplied is passed over) and deletes every row with that `version_id`
+    (goose's `DELETE ... WHERE version_id=?`), including duplicates. At version 0, or when the
+    directory has no file for the current version, goose errors and changes nothing beyond creating
+    its version table; gander raises `MigrationRollbackError` the same way. goose treats a file with
+    no `-- +goose Down` like an empty Down section (logs `EMPTY` and deletes the row, leaving the
+    schema); gander raises instead, per SPEC, since silently keeping the schema while dropping the
+    row is rarely what a rollback wants. An empty Down section is still a no-op rollback, as in goose.

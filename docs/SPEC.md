@@ -68,8 +68,11 @@ against the real goose binary (v3.28.0 is installed) rather than from memory.
   version-table insert, so a failing migration leaves no partial schema and no version
   row; earlier ones in the same run stay applied. `NO TRANSACTION` files run statement by
   statement, in autocommit. Running `up` on an up-to-date database does nothing.
-- `down`: roll back the newest applied migration using its Down section. A migration
-  with no Down section raises.
+- `down`: roll back the migration of the current version (as `version` computes it) using
+  its Down section, in one transaction with deleting every version-table row for that
+  version (`NO TRANSACTION` files in autocommit, as for `up`). A database at version 0, a
+  current version with no file in the directory, and a migration with no Down section
+  raise; an empty Down section only deletes the rows.
 - `version`: the current version as goose computes it: walking rows newest first, the first
   version whose newest row has `is_applied = 1` (0 for a fresh database).
 - Errors are subclasses of one package base exception and name the migration file.

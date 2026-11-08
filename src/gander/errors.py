@@ -20,3 +20,9 @@ class UnsupportedDialectError(GanderError):
     """
     An error raised when the engine is for a database gander does not support.
     """
+
+
+class MigrationRollbackError(GanderError):
+    """
+    An error raised when the current version has no migration file, or no Down section, to roll back with.
+    """
