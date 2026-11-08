@@ -12,3 +12,5 @@
   table rebuild on an app engine with `foreign_keys=ON` cannot cascade.
 - Support engines using SQLAlchemy's pysqlite "emit BEGIN on begin" recipe.
 - An opt-in to roll back a file with no Down section by deleting its row only, as goose does.
+- Public functions taking a caller's `Connection` / `AsyncConnection`, e.g. to migrate on a
+  connection the app already holds.

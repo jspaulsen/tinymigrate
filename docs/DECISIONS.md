@@ -48,10 +48,16 @@
     `sqlite3.complete_statement`** at each `;`, which respects literals, comments and trigger bodies,
     and runs the pieces one by one inside the same transaction, as goose's driver runs them all.
     Statements go through `exec_driver_sql`, so `:name` or `%s` in a literal is never a parameter.
+    A comment-only or empty piece (`SELECT 1; /* c */`, `SELECT 1;;`) still reaches the driver;
+    `sqlite3` and aiosqlite both run it as a no-op, so it is not filtered out.
 13. **Internal functions take a `Connection`; the public ones take an `Engine` and check one out.**
     The async entry points can then run the same code with `AsyncConnection.run_sync`. The SQLite
     check reads `connection.dialect.name` and raises `UnsupportedDialectError`.
-    The `Connection` must be fresh (no transaction begun), since its isolation level is changed.
+    The `Connection` must have no transaction begun, since its isolation level is changed;
+    otherwise gander raises `TransactionStateError` rather than letting SQLAlchemy's
+    `InvalidRequestError` through. The public functions always check out their own connection, so
+    this fires only when something on the engine begins one first (an `engine_connect` listener
+    that runs a statement).
 14. **`MigrationExecutionError` names the file and the failing SQL**, with SQLAlchemy's `DBAPIError`
     as `__cause__` (its `.orig` is the driver's exception), so sync and async drivers look the same.
     Errors creating or reading the version table outside a migration propagate as SQLAlchemy's.
@@ -66,3 +72,12 @@
     row is rarely what a rollback wants. An empty Down section is still a no-op rollback, as in goose.
     Every file in the directory is parsed before rolling back, as for `up`, so a malformed older file
     blocks gander's `down` where goose's CLI parses only the current version's file.
+16. **The async entry points are thin wrappers: each opens one `AsyncConnection` and hands the
+    sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of decision
+    11 is the same over aiosqlite (whose adapter maps `AUTOCOMMIT` and commit/rollback onto
+    `sqlite3`'s); tests that fail when the `BEGIN` or the `AUTOCOMMIT` is removed run over
+    `sqlite+aiosqlite` too. The dependency is `sqlalchemy[asyncio]`, which adds greenlet:
+    `sqlalchemy.ext.asyncio` refuses to import without it, and `runner.py` imports `AsyncEngine`
+    at module level. No async driver is a dependency; the app brings its own (aiosqlite is a dev
+    dependency for the tests). Migration files are parsed before the connection opens, blocking
+    the event loop briefly, as the sync functions parse before touching the database.

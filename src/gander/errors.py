@@ -26,3 +26,9 @@ class MigrationRollbackError(GanderError):
     """
     An error raised when there is no migration to roll back, no file for it, or its file has no Down section.
     """
+
+
+class TransactionStateError(GanderError):
+    """
+    An error raised when the connection gander is given already has a transaction begun.
+    """
