@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 -- The prompt most recently sent for each chat: the debugging record behind the prompt view.
 -- One row per chat, replaced on every reply. Not memory, and not part of the log.
 CREATE TABLE last_prompts (
@@ -13,5 +13,5 @@ CREATE TABLE last_prompts (
     messages TEXT NOT NULL   -- JSON list of {role, content}: exactly what was sent
 );
 
--- +goose Down
+-- down
 DROP TABLE last_prompts;

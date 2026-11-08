@@ -1,15 +1,15 @@
 # gander
 
-Apply [goose](https://github.com/pressly/goose)-compatible SQL migration files through
-SQLAlchemy, without the goose binary.
+Apply SQL migration files through SQLAlchemy, keeping
+[goose](https://github.com/pressly/goose)'s version table, without the goose binary.
 
 gander is plain Python on top of SQLAlchemy 2.x, so it works with SQLModel apps, sync or
-async. It reads the same migration files goose does and keeps goose's `goose_db_version`
-table, so a database goose migrated is continued by gander and the reverse. There is no
+async. Its migration files use a small syntax of its own (below), and it keeps goose's
+`goose_db_version` table, so a database goose migrated is continued by gander. There is no
 subprocess, no `GOOSE_*` environment variable and no `.env` lookup: the engine, the
 directory and the table name are all passed explicitly.
 
-SQLite only, for now. No CLI, no `create` command, no Go migrations, no `ENVSUB`, no
+SQLite only, for now. No CLI, no `create` command, no Go migrations, no
 out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
 
 ## Install
@@ -41,43 +41,42 @@ the repository is private, installing needs git credentials for it.
 One file per migration in a flat directory, named `<version>_<description>.sql`, where
 `<version>` is a positive integer (`00001_create_users.sql`). Files are ordered by the
 integer, not the string. Files not ending in `.sql`, and subdirectories, are ignored; two
-files with the same version, a `.sql` file not named that way, or, as in goose, a
-directory with no `.sql` file at all, are an error.
+files with the same version, a `.sql` file not named that way, a directory with no `.sql`
+file at all, or a missing directory, are an error.
 
 ```sql
--- +goose Up
+-- up
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL
 );
 
--- +goose StatementBegin
 CREATE TRIGGER users_refuse_delete BEFORE DELETE ON users
 BEGIN
     SELECT RAISE(ABORT, 'users are never deleted');
 END;
--- +goose StatementEnd
 
--- +goose Down
+-- down
 DROP TRIGGER users_refuse_delete;
 DROP TABLE users;
 ```
 
-- `-- +goose Up` starts the up section (required, exactly once); `-- +goose Down` starts
-  the down section (optional, at most once). Comments and blank lines before `Up` are
-  ignored; SQL there is an error.
-- A statement ends at a line whose last word, before any `--` comment, ends in `;`. So
-  `x; -- note` ends one, while `x;--note` or a `;` in the middle of a line does not.
-- `-- +goose StatementBegin` / `-- +goose StatementEnd` wrap one statement that contains
-  semicolons of its own, such as a trigger body.
-- `-- +goose NO TRANSACTION` runs that file outside a transaction (see below).
-- Annotations are matched as goose v3.28.0 matches them. An indented or unknown
-  annotation, `ENVSUB ON`/`OFF` included, is an error.
+- `-- up` starts the up section (required, exactly once); `-- down` starts the down
+  section (optional, at most once, after `-- up`). Only `--` comments and blank lines may
+  come before `-- up`.
+- `-- no transaction`, anywhere before `-- up`, runs that file outside a transaction (see
+  below).
+- A marker is a whole line, case-insensitive, with surrounding whitespace ignored. Any
+  other comment is just a comment, except a leftover goose annotation (`-- +goose Up`),
+  which is an error.
+- A statement is the lines up to the one that completes it, as `sqlite3.complete_statement`
+  decides, so a `;` inside a string literal or a trigger body does not end it. Comments
+  before a statement go with it; a section ending in an incomplete statement, or a marker
+  inside one, is an error.
 
 Every file in the directory is parsed, both directions, before gander touches the
 database, so a malformed file raises `MigrationParseError` naming the file and line and
-nothing runs. [`docs/SPEC.md`](docs/SPEC.md) has the full rules, and
-[`docs/DECISIONS.md`](docs/DECISIONS.md) the places gander deliberately differs from goose.
+nothing runs. [`docs/SPEC.md`](docs/SPEC.md) has the full rules.
 
 ## Usage
 
@@ -156,13 +155,12 @@ schema snapshot:
 
 - `collect_migrations(directory)` parses every `.sql` file in `directory` and returns a
   list of `Migration`, ordered by version. It raises `MigrationParseError` as
-  `migrate_up` does, empty directory included.
+  `migrate_up` does, empty or missing directory included.
 - `parse_migration(path)` parses one file into a `Migration`.
 - `Migration` is a frozen dataclass: the file's `path`, the `version` and `description`
-  from its name, `up_statements` and `down_statements` as tuples of SQL strings split as
-  goose splits them (`down_statements` is `None` for a file with no `-- +goose Down`, and
-  an empty tuple for one with nothing under it), and `use_transaction`, `False` for a
-  `NO TRANSACTION` file.
+  from its name, `up_statements` and `down_statements` as tuples of SQL strings
+  (`down_statements` is `None` for a file with no `-- down`, and an empty tuple for one
+  with nothing under it), and `use_transaction`, `False` for a `-- no transaction` file.
 
 ```python
 from gander import collect_migrations
@@ -179,7 +177,7 @@ version row; the migrations before it in the same `migrate_up` stay applied. DDL
 transactional too: gander puts the connection in autocommit and issues `BEGIN` itself,
 because Python's `sqlite3` would otherwise commit each `CREATE` or `ALTER` on its own.
 
-A `-- +goose NO TRANSACTION` file runs statement by statement in autocommit, for SQL that
+A `-- no transaction` file runs statement by statement in autocommit, for SQL that
 SQLite refuses inside a transaction, such as `VACUUM`. If one of its statements fails,
 the statements before it stay applied and no version row is written.
 
@@ -189,7 +187,7 @@ its own, without them. With `PRAGMA foreign_keys=ON`, a table rebuild (create a 
 table, copy, drop the old one, rename) fires the old table's `ON DELETE` actions and
 foreign-key checks, which can delete or reject rows. SQLite ignores
 `PRAGMA foreign_keys=OFF` inside a transaction, so a migration that needs it off must be
-a `NO TRANSACTION` file (turning it back on at the end), or the migrations must run on an
+a `-- no transaction` file (turning it back on at the end), or the migrations must run on an
 engine without that PRAGMA.
 
 gander also needs a connection with no transaction begun. An `engine_connect` listener
@@ -203,32 +201,30 @@ Every error gander raises subclasses `gander.GanderError`:
 
 | Error | Raised when |
 | --- | --- |
-| `MigrationParseError` | A file name or file does not follow goose's format, two files share a version, or the directory has no `.sql` file. Names the file, and the line where there is one, or the empty directory. Nothing has run. |
+| `MigrationParseError` | A file name or file does not follow gander's format, two files share a version, or the directory is missing, not a directory or has no `.sql` file. Names the file, and the line where there is one, or the directory. Nothing has run. |
 | `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file, and the failing SQL when a statement failed; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
-| `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- +goose Down` section. |
+| `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- down` section. |
 | `UnsupportedDialectError` | The engine is for a database other than SQLite. |
 | `TransactionStateError` | The connection gander checks out already has a transaction begun. |
 
 Errors creating or reading the version table outside a migration propagate as
-SQLAlchemy's own, and a missing or non-directory migration path raises `OSError`
-(`FileNotFoundError`, `NotADirectoryError`).
+SQLAlchemy's own.
 
 ## Existing goose databases
 
 The version table has goose v3's shape for sqlite3, created with goose's DDL text, and
 gander reads and writes it by goose's rules. A database goose migrated is picked up where
-goose left off, and the goose CLI can read and continue a database gander migrated.
-Switching an app over needs no change to the database or the migration files.
+goose left off, and the goose CLI reads the version of a database gander migrated.
+Switching an app over needs no change to the database; the migration files are converted
+once (below), after which goose can no longer read them.
 
 Where gander differs from goose:
 
-- `migrate_down` raises on a file with no Down section; goose deletes the version row and
+- `migrate_down` raises on a file with no down section; goose deletes the version row and
   leaves the schema.
 - A migration file older than the newest applied version that has never been applied is
   skipped silently; goose's `up` reports it as missing.
 - `get_version` returns 0 when no row is applied, where goose errors.
-
-[`docs/DECISIONS.md`](docs/DECISIONS.md) lists the parser's differences too.
 
 ## Replacing goose-py
 
@@ -243,9 +239,24 @@ def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
 
 To switch to gander:
 
-1. Replace the dependency: `uv remove goose-py`, then the `uv add` above. The migration
-   directory and the database stay as they are.
-2. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
+1. Replace the dependency: `uv remove goose-py`, then the `uv add` above. The database
+   stays as it is.
+2. Convert the migration files to gander's syntax, in place: each annotation becomes its
+   marker, and StatementBegin/End lines go, since a trigger body needs no marker.
+
+   ```sh
+   sed -i -e 's/^-- +goose Up$/-- up/' -e 's/^-- +goose Down$/-- down/' \
+       -e 's/^-- +goose NO TRANSACTION$/-- no transaction/' \
+       -e '/^-- +goose Statement\(Begin\|End\)$/d' src/<app>/migrations/*.sql
+   ```
+
+   That is GNU sed (on macOS, `gsed`), and it matches only annotations spelled exactly so;
+   goose also accepted other cases and trailing whitespace. `collect_migrations` raises on
+   any `-- +goose` annotation line left, naming its line, so run it over the directory and
+   fix what it reports.
+   A `-- +goose NO TRANSACTION` below `-- +goose Up` must move above `-- up`. goose can no
+   longer read the files.
+3. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
    creates no directories, and SQLite cannot create a database file in a missing one.
 
    ```python
@@ -279,7 +290,7 @@ To switch to gander:
    eval CLI, schema tooling and tests. The engine is a plain one without the app's
    connect-event PRAGMAs, as goose's own connection was, so the `PRAGMA foreign_keys`
    caveat above does not apply.
-3. Delete what only goose-py needed:
+4. Delete what only goose-py needed:
    - Tests of goose-py itself: the `GooseNotFoundError` test
      (`test_migrate_raises_without_goose`) and the `GOOSE_TABLE` one
      (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
@@ -299,14 +310,12 @@ To switch to gander:
      simulacra's CLAUDE.md "goose-py's subprocess" example of a blocking call, and any
      README, CLAUDE.md or decisions text saying the app needs goose on `PATH` or
      `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
-     `docs/decisions.md`). The `Database` and lifespan docstrings stay true: the files are
-     still goose migrations, and they still run before the database opens.
+     `docs/decisions.md`), and text calling the files goose migrations.
 
-The goose binary is still needed to create a migration: gander has no `create` command,
-so `goose -dir src/<app>/migrations -s create <name> sql` keeps working only with goose
-installed. Without it, write the file by hand: the next version, zero-padded to five digits
-as `-s` does (`00005_add_thing.sql`), holding a `-- +goose Up` and a `-- +goose Down`
-section. Change the app's README and CLAUDE.md to say which.
+gander has no `create` command, and goose's `create` writes goose annotations, so a new
+migration is written by hand: the next version, zero-padded to five digits as before
+(`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's
+README and CLAUDE.md to say so.
 
 An app can instead call `migrate_up_async` on its own `AsyncEngine` and drop the thread.
 Then the parent directory must exist before the engine opens the file, every
@@ -323,4 +332,5 @@ uv run ty check
 uv run pytest
 ```
 
-Tests that compare against goose need goose v3.28.0 on `PATH`; they skip without it.
+Tests that compare the version table against goose need goose v3.28.0 on `PATH`; they
+skip without it.

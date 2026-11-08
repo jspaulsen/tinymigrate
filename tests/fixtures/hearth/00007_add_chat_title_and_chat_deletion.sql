@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 -- The name the user gave the chat. NULL until renamed: the chat is then shown under its default
 -- title, the SillyTavern file name for a live import, else the character's current name.
 ALTER TABLE chats ADD COLUMN title TEXT;
@@ -8,22 +8,18 @@ ALTER TABLE chats ADD COLUMN title TEXT;
 -- exists its events stay append-only, as before.
 DROP TRIGGER events_refuse_delete;
 
--- +goose StatementBegin
 CREATE TRIGGER events_refuse_delete BEFORE DELETE ON events
 WHEN EXISTS (SELECT 1 FROM chats WHERE chats.id = OLD.chat_id)
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only; delete the chat to delete its log');
 END;
--- +goose StatementEnd
 
--- +goose Down
+-- down
 DROP TRIGGER events_refuse_delete;
 
--- +goose StatementBegin
 CREATE TRIGGER events_refuse_delete BEFORE DELETE ON events
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only');
 END;
--- +goose StatementEnd
 
 ALTER TABLE chats DROP COLUMN title;

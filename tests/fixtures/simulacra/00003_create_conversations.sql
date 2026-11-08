@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 -- A persona has many conversations; the newest (highest id) is the active one.
 CREATE TABLE conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,6 +15,6 @@ CREATE TABLE messages (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- +goose Down
+-- down
 DROP TABLE messages;
 DROP TABLE conversations;
