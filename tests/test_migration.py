@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pytest
 import tinymigrate
 from tinymigrate import Migration, MigrationParseError, TinymigrateError, collect_migrations, parse_migration
 
-# The real migration directories tinymigrate replaces goose-py in, copied from hearth and simulacra.
+# The real migration directories of hearth and simulacra, converted to tinymigrate syntax.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 
 # (file name, up statement count, down statement count) for every fixture file, as the
@@ -287,6 +288,36 @@ def test_collecting_a_file_instead_of_a_directory_raises_naming_it(tmp_path: Pat
         collect_migrations(path)
 
     assert isinstance(raised.value.__cause__, NotADirectoryError)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-0 directory")
+def test_collecting_an_unreadable_directory_raises_naming_it(tmp_path: Path) -> None:
+    directory = tmp_path / "locked"
+    directory.mkdir()
+    _write_migration(directory, "00001_x.sql", "-- up\nSELECT 1;\n")
+    directory.chmod(0)
+    try:
+        with pytest.raises(MigrationParseError, match=f"cannot read the migration directory {re.escape(str(directory))}: Permission denied") as raised:
+            collect_migrations(directory)
+    finally:
+        directory.chmod(0o700)
+
+    assert isinstance(raised.value.__cause__, PermissionError)
+
+
+def _raise_os_error_without_strerror(_path: Path) -> None:
+    raise OSError("device went away")
+
+
+def test_an_os_error_without_strerror_is_reported_by_its_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _write_migration(tmp_path, "00001_x.sql", "-- up\nSELECT 1;\n")
+    monkeypatch.setattr(Path, "read_bytes", _raise_os_error_without_strerror)
+    monkeypatch.setattr(Path, "iterdir", _raise_os_error_without_strerror)
+
+    with pytest.raises(MigrationParseError, match=r"00001_x\.sql: cannot read the migration file: device went away$"):
+        parse_migration(path)
+    with pytest.raises(MigrationParseError, match=r"cannot read the migration directory .*: device went away$"):
+        collect_migrations(tmp_path)
 
 
 def test_crlf_line_endings_parse_like_lf(tmp_path: Path) -> None:

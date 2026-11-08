@@ -1,7 +1,7 @@
 # tinymigrate
 
-A pure-Python, SQLAlchemy-based replacement for goose-py: it applies SQL migration files in
-its own simple syntax and keeps goose's `goose_db_version` table, with no goose binary.
+A pure-Python, SQLAlchemy-based migration runner: it applies SQL migration files in its own
+simple syntax and records them in its own version table.
 `docs/SPEC.md` is what the package does, `docs/PLAN.md` the order it is built in.
 
 ## Scope
@@ -45,10 +45,6 @@ deliberately invalid code (a negative test), always with a comment saying why.
 - Simple values are module-level constants; fixtures are for setup/teardown and live in
   `tests/conftest.py`. Fakes, not mocks; no `unittest.mock`. Assert with plain `assert`,
   `pytest.raises(..., match=...)` for errors.
-- **Where behaviour must match goose, check it against the real `goose` binary, not from
-  memory.** Use v3.28.0 on `PATH` (on the maintainer's machine,
-  `/home/linuxbrew/.linuxbrew/bin/goose`); CI installs the same version. Tests that run goose skip when it is absent:
-  `pytest.mark.skipif(shutil.which("goose") is None, reason="goose binary not installed")`.
 
 ## Naming
 
@@ -106,7 +102,7 @@ def get_version(engine: Engine, *, table: str = DEFAULT_TABLE) -> int:
     """
     Return the newest applied migration version, or 0 for a fresh database.
 
-    Creates the version table, with goose's seed row, when it does not exist.
+    Creates the version table when it does not exist.
     """
 ```
 

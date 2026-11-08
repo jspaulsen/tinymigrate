@@ -4,7 +4,7 @@
 2. **Pure Python over SQLAlchemy, no goose binary.** The point of the package versus goose-py.
 3. **SQLite only for the MVP.** Both target apps are SQLite. Statement execution goes through
    SQLAlchemy so other dialects are mostly a version-table DDL question; see FUTURE.md.
-4. **Version table matches goose v3's `goose_db_version`.** Existing app databases keep working
+4. *(Superseded by 24.)* **Version table matched goose v3's `goose_db_version`.** Existing app databases keep working
    and the user can still point the goose CLI at them.
 5. **Public GitHub repo `jspaulsen/tinymigrate`**, so apps install from a git tag without
    credentials, as goose-py does. It started private (creating a public repo was blocked at
@@ -24,7 +24,7 @@
    non-UTF-8 file raises; a subdirectory named like a migration is skipped where goose errors. An
    StatementBegin/End block holding nothing or only blank lines yields no statement, where goose
    sends an empty one (or, for a block with nothing in it, silently drops the next SQL line).
-10. **Version table and version rules copied from goose v3.28.0's source and checked against the
+10. *(Superseded by 24.)* **Version table and version rules were copied from goose v3.28.0's source and checked against the
     binary.** The DDL is goose's text byte for byte, so `sqlite_master` matches. `get_version` uses
     goose's `EnsureDBVersion` rule (rows newest first; a version whose newest row has
     `is_applied = 0` is skipped) and creates the table with its `(0, 1)` seed row, as `goose version`
@@ -62,7 +62,7 @@
 14. **`MigrationExecutionError` names the file and the failing SQL**, with SQLAlchemy's `DBAPIError`
     as `__cause__` (its `.orig` is the driver's exception), so sync and async drivers look the same.
     Errors creating or reading the version table outside a migration propagate as SQLAlchemy's.
-15. **`migrate_down` follows goose v3.28.0's `down`, checked against its source and binary, except
+15. *(Superseded by 24, except for the file with no Down section.)* **`migrate_down` followed goose v3.28.0's `down`, checked against its source and binary, except
     for a file with no Down section.** It rolls back the version `get_version` returns (so a version
     whose newest row is unapplied is passed over) and deletes every row with that `version_id`
     (goose's `DELETE ... WHERE version_id=?`), including duplicates. At version 0, or when the
@@ -138,3 +138,23 @@
     (`jspaulsen/gander` became `jspaulsen/tinymigrate`, which GitHub redirects). The rename
     changes no behaviour. The tags `v0.1.0` and `v0.1.1` stay as they were, so they still
     install a package named `gander`.
+24. **tinymigrate has its own version table, `tinymigrate_migration`** (supersedes 4, 10 and
+    the goose rules of 15): `version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL`, created
+    with `CREATE TABLE IF NOT EXISTS` on first use and empty, with no seed row. The current
+    version is `MAX(version)`, or 0 when empty, for `get_version`, `migrate_up` and
+    `migrate_down` alike, so goose's `is_applied` flag, its newest-row walk and its
+    delete-every-duplicate rule are gone; the primary key makes a duplicate row impossible.
+    `applied_at` is `datetime.now(UTC).isoformat()`, set by Python rather than a SQLite
+    `DEFAULT`, so it carries the `+00:00` offset; it is written in the same transaction as the
+    migration, and `migrate_down` deletes the row in the same transaction as the Down. The
+    `table=` keyword stays, and the name is still interpolated unquoted. A database goose
+    migrated is adopted once with the README's SQL snippet, which copies its applied versions
+    across; without it, tinymigrate sees version 0 and would re-run every migration. The tests
+    that ran the goose binary (the version-table cross-checks and the empty and missing
+    directory checks of 17 and 22) are gone, along with CI's goose install; the behaviour they
+    pinned is still tested on tinymigrate itself. The leftover-annotation check of 21 stays: it
+    does not mirror goose, it refuses a half-converted file. Version 0.2.0.
+25. **An `OSError` whose `strerror` is `None` is reported by its own text.** Reading a file or
+    the directory formats `error.strerror or error`, since `strerror` is set only for errors
+    that carry an errno; an `OSError("message")` raised by a filesystem layer would otherwise
+    read `...: None`.
