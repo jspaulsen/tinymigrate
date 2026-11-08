@@ -42,24 +42,24 @@ def get_version(engine: Engine, *, table: str = DEFAULT_TABLE) -> int:
         return _get_version(connection, table)
 
 
-def migrate_up(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+def migrate_up(engine: Engine, directory: str | Path, *, table: str = DEFAULT_TABLE) -> None:
     """
     Apply every migration in `directory` newer than the newest version in the version table.
 
     Each migration runs in its own transaction together with its version-table row, so a
     failing one leaves neither partial schema nor a row, and the ones before it stay
     applied. A `NO TRANSACTION` file runs statement by statement in autocommit. Raises
-    `MigrationParseError` before touching the database when a file is malformed,
-    `MigrationExecutionError` naming the file when the database rejects it,
-    `UnsupportedDialectError` for a database other than SQLite, and `TransactionStateError`
-    when the checked-out connection already has a transaction begun.
+    `MigrationParseError` before touching the database when a file is malformed or
+    `directory` has no `.sql` file, `MigrationExecutionError` naming the file when the
+    database rejects it, `UnsupportedDialectError` for a database other than SQLite, and
+    `TransactionStateError` when the checked-out connection already has a transaction begun.
     """
     migrations = collect_migrations(directory)
     with engine.connect() as connection:
         _migrate_up(connection, migrations, table)
 
 
-def migrate_down(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+def migrate_down(engine: Engine, directory: str | Path, *, table: str = DEFAULT_TABLE) -> None:
     """
     Roll back the migration of the current version with its Down section.
 
@@ -70,13 +70,14 @@ def migrate_down(engine: Engine, directory: Path, *, table: str = DEFAULT_TABLE)
     statement by statement in autocommit. Raises `MigrationRollbackError` when the database
     is at version 0, when `directory` has no file for the current version or that file has
     no Down section, `MigrationParseError` before touching the database when any file in
-    `directory` is malformed, `MigrationExecutionError` naming the file when the database
-    rejects it, `UnsupportedDialectError` for a database other than SQLite, and
-    `TransactionStateError` when the checked-out connection already has a transaction begun.
+    `directory` is malformed or there is none, `MigrationExecutionError` naming the file
+    when the database rejects it, `UnsupportedDialectError` for a database other than
+    SQLite, and `TransactionStateError` when the checked-out connection already has a
+    transaction begun.
     """
     migrations = collect_migrations(directory)
     with engine.connect() as connection:
-        _migrate_down(connection, migrations, directory, table)
+        _migrate_down(connection, migrations, Path(directory), table)
 
 
 async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) -> int:
@@ -89,7 +90,7 @@ async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) 
         return await connection.run_sync(_get_version, table)
 
 
-async def migrate_up_async(engine: AsyncEngine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+async def migrate_up_async(engine: AsyncEngine, directory: str | Path, *, table: str = DEFAULT_TABLE) -> None:
     """
     Apply every migration in `directory` newer than the newest version, over an `AsyncEngine`.
 
@@ -101,7 +102,7 @@ async def migrate_up_async(engine: AsyncEngine, directory: Path, *, table: str =
         await connection.run_sync(_migrate_up, migrations, table)
 
 
-async def migrate_down_async(engine: AsyncEngine, directory: Path, *, table: str = DEFAULT_TABLE) -> None:
+async def migrate_down_async(engine: AsyncEngine, directory: str | Path, *, table: str = DEFAULT_TABLE) -> None:
     """
     Roll back the migration of the current version with its Down section, over an `AsyncEngine`.
 
@@ -110,7 +111,7 @@ async def migrate_down_async(engine: AsyncEngine, directory: Path, *, table: str
     """
     migrations = collect_migrations(directory)
     async with engine.connect() as connection:
-        await connection.run_sync(_migrate_down, migrations, directory, table)
+        await connection.run_sync(_migrate_down, migrations, Path(directory), table)
 
 
 def _get_version(connection: Connection, table: str) -> int:

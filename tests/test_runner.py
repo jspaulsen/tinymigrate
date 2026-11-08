@@ -1,6 +1,7 @@
 import shutil
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ import gander
 from gander import (
     GanderError,
     MigrationExecutionError,
+    MigrationParseError,
     MigrationRollbackError,
     TransactionStateError,
     UnsupportedDialectError,
@@ -573,6 +575,41 @@ def test_goose_down_rolls_back_the_same_version_as_migrate_down_when_a_row_is_no
     assert _read_version_rows(database_path) == _read_version_rows(goose_database)
 
 
+def test_migrate_up_and_migrate_down_accept_a_str_directory(engine: Engine) -> None:
+    migrate_up(engine, str(SIMULACRA_DIRECTORY))
+    assert get_version(engine) == SIMULACRA_LATEST_VERSION
+
+    migrate_down(engine, str(SIMULACRA_DIRECTORY))
+    assert get_version(engine) == SIMULACRA_LATEST_VERSION - 1
+
+
+@pytest.mark.parametrize("migrate", [migrate_up, migrate_down])
+def test_a_directory_with_no_migration_files_raises_without_touching_the_database(
+    engine: Engine, database_path: Path, tmp_path: Path, migrate: Callable[[Engine, Path], None]
+) -> None:
+    empty_directory = tmp_path / "empty"
+    empty_directory.mkdir()
+
+    with pytest.raises(MigrationParseError, match="no migration files found in .*empty"):
+        migrate(engine, empty_directory)
+
+    assert not database_path.exists()
+
+
+@requires_goose
+@pytest.mark.parametrize("command", ["up", "down"])
+def test_goose_also_fails_without_touching_the_database_on_a_directory_with_no_migration_files(tmp_path: Path, command: str) -> None:
+    empty_directory = tmp_path / "empty"
+    empty_directory.mkdir()
+    database = tmp_path / "goose.db"
+
+    result = subprocess.run(["goose", "-dir", str(empty_directory), "sqlite3", str(database), command], capture_output=True, text=True, check=False)
+
+    assert result.returncode != 0
+    assert "no migration files found" in result.stderr
+    assert not database.exists()
+
+
 @requires_goose
 def test_goose_down_also_fails_and_changes_nothing_where_migrate_down_raises(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     partial_directory = _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", 2)
@@ -760,3 +797,11 @@ async def test_a_sqlmodel_async_session_reads_and_writes_a_table_the_async_migra
 
     assert characters == [("Mira", "Hello.")]
     assert await get_version_async(async_engine) == HEARTH_LATEST_VERSION
+
+
+async def test_the_async_functions_accept_a_str_directory(async_engine: AsyncEngine) -> None:
+    await migrate_up_async(async_engine, str(SIMULACRA_DIRECTORY))
+    assert await get_version_async(async_engine) == SIMULACRA_LATEST_VERSION
+
+    await migrate_down_async(async_engine, str(SIMULACRA_DIRECTORY))
+    assert await get_version_async(async_engine) == SIMULACRA_LATEST_VERSION - 1

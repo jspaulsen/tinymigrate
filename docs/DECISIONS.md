@@ -81,3 +81,26 @@
     at module level. No async driver is a dependency; the app brings its own (aiosqlite is a dev
     dependency for the tests). Migration files are parsed before the connection opens, blocking
     the event loop briefly, as the sync functions parse before touching the database.
+17. **A directory with no `.sql` file raises `MigrationParseError` naming the directory**, from
+    `collect_migrations` and so from `migrate_up` and `migrate_down` (sync and async), before the
+    database is touched. goose v3.28.0's `up` and `down` both fail with `no migration files found`
+    and do not even create the database file; checked against the binary, and a test keeps it so.
+    goose's `version` succeeds on an empty directory, and so does `get_version`, which takes no
+    directory. An empty directory is how an app finds out its migrations were left out of the wheel
+    or the path is wrong, so failing at startup beats starting on an unmigrated database. It reuses
+    `MigrationParseError` (a directory that does not follow goose's format) rather than adding an
+    error class nobody yet needs to tell apart.
+18. **Paths are `str | Path`.** goose-py took the directory as a `str`, so switching apps will pass
+    one. `parse_migration` and `collect_migrations` wrap their argument in `Path` once, and the
+    runner hands its `directory` straight to `collect_migrations`; `os.PathLike` is not accepted
+    in the annotation, since nothing passes one.
+19. **The README's goose-py recipe keeps the app's blocking `migrate(path)` and swaps only the goose
+    call for `migrate_up` on a throwaway sync engine.** Its `mkdir`, its thread and all its callers
+    (lifespan, hearth's eval CLI, schema tooling, tests) stay as they are, and the engine has none of
+    the app's PRAGMAs, as goose's own connection had none. The earlier recipe moved migrating onto the
+    app's `AsyncEngine`, which broke simulacra's parent-directory test and every `to_thread` caller.
+    Applied literally to a copy of simulacra with goose off `PATH`: suite, ruff and ty pass. The
+    `migrate_up_async` route stays a one-paragraph alternative.
+20. **`Migration`, `parse_migration` and `collect_migrations` stay exported and are documented** in
+    the README, for tooling that needs the migrations without a database (a schema snapshot, a CI
+    check of the directory).

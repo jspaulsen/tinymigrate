@@ -17,18 +17,18 @@ out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
 gander is not on PyPI. Install it from GitHub, pinned to a release tag:
 
 ```sh
-uv add git+https://github.com/jspaulsen/gander --tag v0.1.0
+uv add git+https://github.com/jspaulsen/gander --tag v0.1.1
 ```
 
-which records it in `pyproject.toml` as below (`uv add "gander @ git+https://github.com/jspaulsen/gander@v0.1.0"`
-works too, and records `rev = "v0.1.0"` instead of `tag`):
+which records it in `pyproject.toml` as below (`uv add "gander @ git+https://github.com/jspaulsen/gander@v0.1.1"`
+works too, and records `rev = "v0.1.1"` instead of `tag`):
 
 ```toml
 [project]
 dependencies = ["gander"]
 
 [tool.uv.sources]
-gander = { git = "https://github.com/jspaulsen/gander", tag = "v0.1.0" }
+gander = { git = "https://github.com/jspaulsen/gander", tag = "v0.1.1" }
 ```
 
 It depends on `sqlalchemy[asyncio]>=2` and Python 3.12+. No database driver comes with
@@ -41,7 +41,8 @@ the repository is private, installing needs git credentials for it.
 One file per migration in a flat directory, named `<version>_<description>.sql`, where
 `<version>` is a positive integer (`00001_create_users.sql`). Files are ordered by the
 integer, not the string. Files not ending in `.sql`, and subdirectories, are ignored; two
-files with the same version, or a `.sql` file not named that way, are an error.
+files with the same version, a `.sql` file not named that way, or, as in goose, a
+directory with no `.sql` file at all, are an error.
 
 ```sql
 -- +goose Up
@@ -99,6 +100,8 @@ migrate_down(engine, migrations)  # roll back the current version's migration
 print(get_version(engine))  # 0
 ```
 
+`directory` is a `Path` or a `str`.
+
 - `migrate_up(engine, directory)` applies, in order, every migration newer than the
   largest version in the version table. On an up-to-date database it does nothing.
 - `migrate_down(engine, directory)` rolls back one migration, the current version's, with
@@ -145,6 +148,28 @@ The work runs on one of the engine's connections through `AsyncConnection.run_sy
 there is no thread to hand it to. The migration files are read and parsed on the event
 loop before the connection opens, which blocks it briefly.
 
+### Parsing without a database
+
+The parser the functions above use is public too, for tooling and tests that need the
+migrations but no database, such as checking a migration directory in CI or generating a
+schema snapshot:
+
+- `collect_migrations(directory)` parses every `.sql` file in `directory` and returns a
+  list of `Migration`, ordered by version. It raises `MigrationParseError` as
+  `migrate_up` does, empty directory included.
+- `parse_migration(path)` parses one file into a `Migration`.
+- `Migration` is a frozen dataclass: `version`, `description` and `path` from the file
+  name, `up_statements` and `down_statements` as tuples of SQL strings split as goose
+  splits them (`down_statements` is `None` for a file with no `-- +goose Down`), and
+  `use_transaction`, `False` for a `NO TRANSACTION` file.
+
+```python
+from gander import collect_migrations
+
+migrations = collect_migrations("migrations")
+assert all(migration.down_statements is not None for migration in migrations)
+```
+
 ## Transactions
 
 Each migration file runs in its own transaction together with its version-table insert
@@ -177,7 +202,7 @@ Every error gander raises subclasses `gander.GanderError`:
 
 | Error | Raised when |
 | --- | --- |
-| `MigrationParseError` | A file name or file does not follow goose's format, or two files share a version. Names the file, and the line where there is one. Nothing has run. |
+| `MigrationParseError` | A file name or file does not follow goose's format, two files share a version, or the directory has no `.sql` file. Names the file, and the line where there is one. Nothing has run. |
 | `MigrationExecutionError` | The database rejects a migration's SQL, its version-table update or its commit. Names the file, and the failing SQL when a statement failed; `__cause__` is SQLAlchemy's `DBAPIError`, whose `.orig` is the driver's exception. |
 | `MigrationRollbackError` | `migrate_down` finds the database at version 0, no file for the current version, or a file with no `-- +goose Down` section. |
 | `UnsupportedDialectError` | The engine is for a database other than SQLite. |
@@ -206,71 +231,77 @@ Where gander differs from goose:
 
 ## Replacing goose-py
 
-simulacra and hearth run goose-py from their FastAPI lifespan, in a thread, before the
-database opens:
+simulacra and hearth call goose-py from a blocking `migrate`, which their FastAPI lifespan
+runs in a thread before the database opens:
 
 ```python
-from pathlib import Path
-
-from goose_py import Goose
-
-MIGRATIONS = Path(__file__).resolve().parent / "migrations"
-
-
-def migrate(path: Path) -> None:
+def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Goose("sqlite3", str(path), str(MIGRATIONS), table="goose_db_version").up()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    await asyncio.to_thread(migrate, DATABASE_PATH)
-    database = Database.at(DATABASE_PATH)
-    ...
-    yield
+    Goose("sqlite3", str(path), str(migrations), table="goose_db_version").up()
 ```
 
 To switch to gander:
 
 1. Replace the dependency: `uv remove goose-py`, then the `uv add` above. The migration
    directory and the database stay as they are.
-2. Make `migrate` take the app's engine, open the database first, and drop the
-   `asyncio.to_thread`:
+2. Replace the goose call in `migrate`, keeping its signature and its `mkdir`: gander
+   creates no directories, and SQLite cannot create a database file in a missing one.
 
    ```python
    from pathlib import Path
 
-   from sqlalchemy.ext.asyncio import AsyncEngine
+   from gander import migrate_up
+   from sqlalchemy import create_engine
 
-   from gander import migrate_up_async
-
+   # Inside the package, so the wheel ships them and they resolve the same from a source tree.
    MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 
 
-   async def migrate(engine: AsyncEngine) -> None:
-       await migrate_up_async(engine, MIGRATIONS)
+   def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
+       """
+       Bring the SQLite database at `path` up to the newest migration in `migrations`.
 
-
-   @asynccontextmanager
-   async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-       database = Database.at(DATABASE_PATH)  # creates the parent directory
-       await migrate(database.engine)
-       ...
-       yield
+       Blocking, so an async caller hands this to a thread.
+       """
+       path.parent.mkdir(parents=True, exist_ok=True)
+       engine = create_engine(f"sqlite:///{path}")
+       try:
+           migrate_up(engine, migrations)
+       finally:
+           engine.dispose()
    ```
 
-Every other caller of `migrate` must change too: an `asyncio.to_thread(migrate, path)`
-elsewhere (hearth's eval CLI has one) would now return a coroutine that never runs, so it
-becomes `await migrate(database.engine)`, and sync callers such as schema tooling and tests
-can call `migrate_up(create_engine(f"sqlite:///{path}"), MIGRATIONS)` (the parent directory
-must exist).
+   In the app, `gander` is a third-party package like `sqlalchemy`, so its import goes in
+   the same block, sorted alphabetically, or ruff's isort (`I001`) fails. Every caller of
+   `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, hearth's
+   eval CLI, schema tooling and tests. The engine is a plain one without the app's
+   connect-event PRAGMAs, as goose's own connection was, so the `PRAGMA foreign_keys`
+   caveat above does not apply.
+3. Delete what only goose-py needed:
+   - Tests of goose-py itself: the `GooseNotFoundError` test
+     (`test_migrate_raises_without_goose`) and the `GOOSE_TABLE` one
+     (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
+     gander reads no environment variable. The `pytest` import they used goes too.
+   - The `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip in
+     simulacra's `tests/test_schema_sync.py`, with its imports, or the test skips silently
+     once goose is gone.
+   - CI's "Install goose" step and its `GOOSE_VERSION` env.
+   - Text naming goose-py or a required goose binary: `migrate`'s old docstring ("goose
+     runs as a subprocess", "Raises goose-py's `GooseError`"), the `GooseNotFoundError`
+     line in `generate_schema_sql`'s docstring, CLAUDE.md's "goose-py's subprocess"
+     example of a blocking call, and the README and CLAUDE.md lines saying the app needs
+     goose on `PATH` or `GOOSE_BINARY` to start.
 
-The goose binary is no longer needed in development or CI. Remove the
-`shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip markers from
-tests that only needed it to migrate, or they skip silently once goose is gone, and
-delete tests of goose-py's own errors (`GooseNotFoundError`). Both apps' `Database` turns
-`PRAGMA foreign_keys` on for every connection, so the caveat above applies to any
-migration that rebuilds a table.
+The goose binary is still needed to create a migration: gander has no `create` command,
+so `goose -dir src/<app>/migrations -s create <name> sql` keeps working only with goose
+installed. Without it, write the file by hand: the next version, zero-padded to five digits
+as `-s` does (`00005_add_thing.sql`), holding a `-- +goose Up` and a `-- +goose Down`
+section. Change the app's README and CLAUDE.md to say which.
+
+An app can instead call `migrate_up_async` on its own `AsyncEngine` and drop the thread.
+Then the parent directory must exist before the engine opens the file, every
+`asyncio.to_thread(migrate, ...)` caller has to change, and the engine's PRAGMAs are in
+force while migrating.
 
 ## Development
 
