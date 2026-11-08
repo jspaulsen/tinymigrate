@@ -9,9 +9,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GOOSE_VERSION: v3.28.0
-
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -22,13 +19,6 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.12"
-
-      # The goose-compatibility tests skip without it, so CI would never run them.
-      - name: Install goose
-        run: |
-          curl -fsSL -o /usr/local/bin/goose "https://github.com/pressly/goose/releases/download/${GOOSE_VERSION}/goose_linux_x86_64"
-          chmod +x /usr/local/bin/goose
-          goose --version
 
       - run: uv sync --locked
       - run: uv run ruff check .

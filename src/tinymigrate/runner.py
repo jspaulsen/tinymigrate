@@ -2,9 +2,10 @@ import logging
 import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -13,30 +14,23 @@ from tinymigrate.migration import Migration, collect_migrations
 
 logger = logging.getLogger(__name__)
 
-# goose's default version table name, so a database goose migrated is picked up unchanged.
-DEFAULT_TABLE = "goose_db_version"
+# Named after the package so it cannot collide with a table of the application it migrates.
+DEFAULT_TABLE = "tinymigrate_migration"
 
 # The SQLAlchemy dialect name of the only database the MVP supports.
 _SUPPORTED_DIALECT = "sqlite"
 
-# goose v3.28.0's sqlite3 version table DDL, whitespace included, so `sqlite_master` holds
-# the same text whichever tool created the table. `{table}` goes in unquoted, as in goose.
-_CREATE_VERSION_TABLE = """CREATE TABLE {table} (
-\t\tid INTEGER PRIMARY KEY AUTOINCREMENT,
-\t\tversion_id INTEGER NOT NULL,
-\t\tis_applied INTEGER NOT NULL,
-\t\ttstamp TIMESTAMP DEFAULT (datetime('now'))
-\t)"""
+# One row per applied migration; `{table}` goes in unquoted, so it must be a plain identifier.
+_CREATE_VERSION_TABLE = "CREATE TABLE IF NOT EXISTS {table} (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
 
 
 def get_version(engine: Engine, *, table: str = DEFAULT_TABLE) -> int:
     """
-    Return the current migration version of the database, or 0 for a fresh one.
+    Return the newest applied migration version of the database, or 0 for a fresh one.
 
-    Creates the version table, with goose's seed row for version 0, when it does not exist.
-    As in goose, a version whose newest row has `is_applied = 0` does not count as applied.
-    Raises `UnsupportedDialectError` for a database other than SQLite, and
-    `TransactionStateError` when the checked-out connection already has a transaction begun.
+    Creates the version table when it does not exist. Raises `UnsupportedDialectError` for
+    a database other than SQLite, and `TransactionStateError` when the checked-out
+    connection already has a transaction begun.
     """
     with engine.connect() as connection:
         return _get_version(connection, table)
@@ -46,13 +40,14 @@ def migrate_up(engine: Engine, directory: str | Path, *, table: str = DEFAULT_TA
     """
     Apply every migration in `directory` newer than the newest version in the version table.
 
-    Each migration runs in its own transaction together with its version-table row, so a
-    failing one leaves neither partial schema nor a row, and the ones before it stay
-    applied. A `NO TRANSACTION` file runs statement by statement in autocommit. Raises
-    `MigrationParseError` before touching the database when a file is malformed or
-    `directory` has no `.sql` file, `MigrationExecutionError` naming the file when the
-    database rejects it, `UnsupportedDialectError` for a database other than SQLite, and
-    `TransactionStateError` when the checked-out connection already has a transaction begun.
+    Each migration runs in its own transaction together with inserting its version-table
+    row, stamped with the UTC time in ISO-8601, so a failing one leaves neither partial
+    schema nor a row, and the ones before it stay applied. A `-- no transaction` file runs
+    statement by statement in autocommit. Raises `MigrationParseError` before touching the
+    database when a file is malformed or `directory` has no `.sql` file,
+    `MigrationExecutionError` naming the file when the database rejects it,
+    `UnsupportedDialectError` for a database other than SQLite, and `TransactionStateError`
+    when the checked-out connection already has a transaction begun.
     """
     migrations = collect_migrations(directory)
     with engine.connect() as connection:
@@ -65,9 +60,9 @@ def migrate_down(engine: Engine, directory: str | Path, *, table: str = DEFAULT_
 
     The current version is the one `get_version` returns, and as there the version table is
     created when it does not exist, even when the rollback then raises. Its Down statements
-    run in one transaction together with deleting every version-table row for it, so a
-    failing one leaves the schema and the rows as they were; a `NO TRANSACTION` file runs
-    statement by statement in autocommit. Raises `MigrationRollbackError` when the database
+    run in one transaction together with deleting its version-table row, so a failing one
+    leaves the schema and the row as they were; a `-- no transaction` file runs statement
+    by statement in autocommit. Raises `MigrationRollbackError` when the database
     is at version 0, when `directory` has no file for the current version or that file has
     no Down section, `MigrationParseError` before touching the database when any file in
     `directory` is malformed or there is none, `MigrationExecutionError` naming the file
@@ -82,7 +77,7 @@ def migrate_down(engine: Engine, directory: str | Path, *, table: str = DEFAULT_
 
 async def get_version_async(engine: AsyncEngine, *, table: str = DEFAULT_TABLE) -> int:
     """
-    Return the current migration version of the database behind an `AsyncEngine`, or 0 for a fresh one.
+    Return the newest applied migration version of the database behind an `AsyncEngine`, or 0 for a fresh one.
 
     Behaves as `get_version`, running it on one of the engine's connections.
     """
@@ -117,17 +112,12 @@ async def migrate_down_async(engine: AsyncEngine, directory: str | Path, *, tabl
 def _get_version(connection: Connection, table: str) -> int:
     _prepare_connection(connection)
     with _begin_transaction(connection):
-        _ensure_version_table(connection, table)
-        return _read_version(connection, table)
+        connection.exec_driver_sql(_CREATE_VERSION_TABLE.format(table=table))
+        return connection.execute(text(f"SELECT MAX(version) FROM {table}")).scalar_one() or 0
 
 
 def _migrate_up(connection: Connection, migrations: list[Migration], table: str) -> None:
-    _prepare_connection(connection)
-    with _begin_transaction(connection):
-        _ensure_version_table(connection, table)
-        # goose's `up` compares against the largest recorded version, applied or not.
-        current = _read_max_version(connection, table)
-
+    current = _get_version(connection, table)
     for migration in migrations:
         if migration.version <= current:
             continue
@@ -202,35 +192,9 @@ def _split_statement(statement: str) -> list[str]:
     return sql_statements
 
 
-def _ensure_version_table(connection: Connection, table: str) -> None:
-    if inspect(connection).has_table(table):
-        return
-    connection.exec_driver_sql(_CREATE_VERSION_TABLE.format(table=table))
-    _insert_version(connection, table, 0)
-
-
 def _insert_version(connection: Connection, table: str, version: int) -> None:
-    connection.execute(text(f"INSERT INTO {table} (version_id, is_applied) VALUES (:version, 1)"), {"version": version})
+    connection.execute(text(f"INSERT INTO {table} (version, applied_at) VALUES (:version, :applied_at)"), {"version": version, "applied_at": datetime.now(UTC).isoformat()})
 
 
 def _delete_version(connection: Connection, table: str, version: int) -> None:
-    # As goose does, every row for the version goes, not only the newest.
-    connection.execute(text(f"DELETE FROM {table} WHERE version_id = :version"), {"version": version})
-
-
-def _read_version(connection: Connection, table: str) -> int:
-    # goose's rule: walking rows newest first, the first version whose newest row is applied.
-    rows = connection.execute(text(f"SELECT version_id, is_applied FROM {table} ORDER BY id DESC"))
-    not_applied: set[int] = set()
-    for version, is_applied in rows:
-        if version in not_applied:
-            continue
-        if is_applied:
-            return version
-        not_applied.add(version)
-
-    return 0
-
-
-def _read_max_version(connection: Connection, table: str) -> int:
-    return connection.execute(text(f"SELECT MAX(version_id) FROM {table}")).scalar_one() or 0
+    connection.execute(text(f"DELETE FROM {table} WHERE version = :version"), {"version": version})

@@ -1,13 +1,12 @@
 # tinymigrate
 
-Apply SQL migration files through SQLAlchemy, keeping
-[goose](https://github.com/pressly/goose)'s version table, without the goose binary.
+Apply SQL migration files through SQLAlchemy.
 
 tinymigrate is plain Python on top of SQLAlchemy 2.x, so it works with SQLModel apps, sync or
-async. Its migration files use a small syntax of its own (below), and it keeps goose's
-`goose_db_version` table, so a database goose migrated is continued by tinymigrate. There is no
-subprocess, no `GOOSE_*` environment variable and no `.env` lookup: the engine, the
-directory and the table name are all passed explicitly.
+async. Its migration files use a small syntax of its own, and it records what it applied in
+a small version table of its own (both below). There is no subprocess, no environment
+variable and no `.env` lookup: the engine, the directory and the table name are all passed
+explicitly.
 
 SQLite only, for now. No CLI, no `create` command, no Go migrations, no
 out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
@@ -17,18 +16,18 @@ out-of-order migrations, no locking ([`docs/FUTURE.md`](docs/FUTURE.md)).
 tinymigrate is not on PyPI. Install it from GitHub, pinned to a release tag:
 
 ```sh
-uv add git+https://github.com/jspaulsen/tinymigrate --tag v0.1.1
+uv add git+https://github.com/jspaulsen/tinymigrate --tag v0.2.0
 ```
 
-which records it in `pyproject.toml` as below (`uv add "tinymigrate @ git+https://github.com/jspaulsen/tinymigrate@v0.1.1"`
-works too, and records `rev = "v0.1.1"` instead of `tag`):
+which records it in `pyproject.toml` as below (`uv add "tinymigrate @ git+https://github.com/jspaulsen/tinymigrate@v0.2.0"`
+works too, and records `rev = "v0.2.0"` instead of `tag`):
 
 ```toml
 [project]
 dependencies = ["tinymigrate"]
 
 [tool.uv.sources]
-tinymigrate = { git = "https://github.com/jspaulsen/tinymigrate", tag = "v0.1.1" }
+tinymigrate = { git = "https://github.com/jspaulsen/tinymigrate", tag = "v0.2.0" }
 ```
 
 It depends on `sqlalchemy[asyncio]>=2` and Python 3.12+. No database driver comes with
@@ -67,7 +66,7 @@ DROP TABLE users;
   below).
 - A marker is a whole line, case-insensitive, with surrounding whitespace ignored. Any
   other comment is just a comment, except a leftover goose annotation (`-- +goose Up`),
-  which is an error.
+  which is an error, so a half-converted goose file cannot run.
 - A statement is the lines up to the one that completes it, as `sqlite3.complete_statement`
   decides, so a `;` inside a string literal or a trigger body does not end it. Comments
   before a statement go with it; a section ending in an incomplete statement, or a marker
@@ -101,14 +100,21 @@ print(get_version(engine))  # 0
 `directory` is a `Path` or a `str`.
 
 - `migrate_up(engine, directory)` applies, in order, every migration newer than the
-  largest version in the version table. On an up-to-date database it does nothing.
+  current version. On an up-to-date database it does nothing.
 - `migrate_down(engine, directory)` rolls back one migration, the current version's, with
-  its Down section, and deletes that version's rows from the version table.
-- `get_version(engine)` returns the current version as goose computes it.
+  its Down section, and deletes that version's row from the version table.
+- `get_version(engine)` returns the current version: the largest version in the version
+  table, or 0 when it is empty.
 
-All three create the version table, with goose's seed row for version 0, when it does not
-exist. Each takes a keyword-only `table=` for a version table other than
-`goose_db_version`. tinymigrate logs `applied migration <file>` and
+All three create the version table when it does not exist:
+
+```sql
+CREATE TABLE tinymigrate_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+```
+
+with one row per applied migration, `applied_at` the UTC time it was applied in ISO-8601
+(`2026-11-08T12:00:00.123456+00:00`). Each function takes a keyword-only `table=` for a
+version table named other than `tinymigrate_migration`. tinymigrate logs `applied migration <file>` and
 `rolled back migration <file>` at INFO on the `tinymigrate.runner` logger.
 
 ### Async
@@ -181,8 +187,7 @@ SQLite refuses inside a transaction, such as `VACUUM`. If one of its statements 
 the statements before it stay applied and no version row is written.
 
 **`PRAGMA foreign_keys`.** tinymigrate migrates on the connection your engine gives it, so the
-engine's connect-event PRAGMAs stay in force while migrating. goose opens a connection of
-its own, without them. With `PRAGMA foreign_keys=ON`, a table rebuild (create a new
+engine's connect-event PRAGMAs stay in force while migrating. With `PRAGMA foreign_keys=ON`, a table rebuild (create a new
 table, copy, drop the old one, rename) fires the old table's `ON DELETE` actions and
 foreign-key checks, which can delete or reject rows. SQLite ignores
 `PRAGMA foreign_keys=OFF` inside a transaction, so a migration that needs it off must be
@@ -209,22 +214,6 @@ Every error tinymigrate raises subclasses `tinymigrate.TinymigrateError`:
 Errors creating or reading the version table outside a migration propagate as
 SQLAlchemy's own.
 
-## Existing goose databases
-
-The version table has goose v3's shape for sqlite3, created with goose's DDL text, and
-tinymigrate reads and writes it by goose's rules. A database goose migrated is picked up where
-goose left off, and the goose CLI reads the version of a database tinymigrate migrated.
-Switching an app over needs no change to the database; the migration files are converted
-once (below), after which goose can no longer read them.
-
-Where tinymigrate differs from goose:
-
-- `migrate_down` raises on a file with no down section; goose deletes the version row and
-  leaves the schema.
-- A migration file older than the newest applied version that has never been applied is
-  skipped silently; goose's `up` reports it as missing.
-- `get_version` returns 0 when no row is applied, where goose errors.
-
 ## Replacing goose-py
 
 simulacra and hearth call goose-py from a blocking `migrate`, which their FastAPI lifespan
@@ -238,8 +227,7 @@ def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
 
 To switch to tinymigrate:
 
-1. Replace the dependency: `uv remove goose-py`, then the `uv add` above. The database
-   stays as it is.
+1. Replace the dependency: `uv remove goose-py`, then the `uv add` above.
 2. Convert the migration files to tinymigrate's syntax, in place: each annotation becomes its
    marker, and StatementBegin/End lines go, since a trigger body needs no marker.
 
@@ -287,9 +275,14 @@ To switch to tinymigrate:
    the same block, sorted alphabetically, or ruff's isort (`I001`) fails. Every caller of
    `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, hearth's
    eval CLI, schema tooling and tests. The engine is a plain one without the app's
-   connect-event PRAGMAs, as goose's own connection was, so the `PRAGMA foreign_keys`
-   caveat above does not apply.
-4. Delete what only goose-py needed:
+   connect-event PRAGMAs, so the `PRAGMA foreign_keys` caveat above does not apply.
+4. Point what reads the version table at tinymigrate's: the tests' `SELECT
+   max(version_id) FROM goose_db_version` becomes `SELECT max(version) FROM
+   tinymigrate_migration` (`tests/test_migrate.py` and `tests/test_lifespan.py` in both
+   apps), and `generate_schema_sql` in `tests/schema_tools.py` drops
+   `tinymigrate_migration` instead of `goose_db_version` before dumping, since its
+   `applied_at` values differ on every run.
+5. Delete what only goose-py needed:
    - Tests of goose-py itself: the `GooseNotFoundError` test
      (`test_migrate_raises_without_goose`) and the `GOOSE_TABLE` one
      (`test_stray_goose_table_is_ignored`), which still passes but tests nothing, since
@@ -305,21 +298,51 @@ To switch to tinymigrate:
      `.github/workflows/ci.yml`).
    - Text naming goose-py or a required goose binary: `migrate`'s old docstring ("goose
      runs as a subprocess", "Raises goose-py's `GooseError`"), the `GooseNotFoundError`
-     line in `generate_schema_sql`'s docstring (`tests/schema_tools.py` in both apps),
-     simulacra's CLAUDE.md "goose-py's subprocess" example of a blocking call, and any
-     README, CLAUDE.md or decisions text saying the app needs goose on `PATH` or
-     `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's README and
-     `docs/decisions.md`), and text calling the files goose migrations.
+     line in `generate_schema_sql`'s docstring and its "goose's bookkeeping table" comment
+     (`tests/schema_tools.py` in both apps), simulacra's CLAUDE.md "goose-py's subprocess"
+     example of a blocking call, and any README, CLAUDE.md or decisions text saying the app
+     needs goose on `PATH` or `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's
+     README and `docs/decisions.md`), and text calling the files goose migrations.
+6. Adopt every existing database goose migrated, once, before the app first starts on
+   tinymigrate (below).
 
-tinymigrate has no `create` command, and goose's `create` writes goose annotations, so a new
-migration is written by hand: the next version, zero-padded to five digits as before
-(`00005_add_thing.sql`), holding a `-- up` and a `-- down` section. Change the app's
-README and CLAUDE.md to say so.
+tinymigrate has no `create` command, so a new migration is written by hand: the next version,
+zero-padded to five digits as before (`00005_add_thing.sql`), holding a `-- up` and a
+`-- down` section. Change the app's README and CLAUDE.md to say so.
 
 An app can instead call `migrate_up_async` on its own `AsyncEngine` and drop the thread.
 Then the parent directory must exist before the engine opens the file, every
 `asyncio.to_thread(migrate, ...)` caller has to change, and the engine's PRAGMAs are in
 force while migrating.
+
+### Adopting a database goose migrated
+
+tinymigrate does not read `goose_db_version`. On a database goose migrated it sees version 0
+and runs every migration again from the first, until one fails (`table ... already
+exists`); any before it that succeed are applied a second time and recorded, as
+simulacra's `SELECT 1` first migration would be. So before the app first starts on
+tinymigrate, copy the applied versions across once, with this SQL saved as `adopt.sql`:
+
+```sql
+BEGIN;
+CREATE TABLE IF NOT EXISTS tinymigrate_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+INSERT OR IGNORE INTO tinymigrate_migration (version, applied_at)
+SELECT version_id, strftime('%Y-%m-%dT%H:%M:%S+00:00', tstamp) FROM goose_db_version
+WHERE id IN (SELECT max(id) FROM goose_db_version GROUP BY version_id) AND is_applied = 1 AND version_id > 0;
+COMMIT;
+```
+
+```sh
+sqlite3 app.db < adopt.sql            # or, without the sqlite3 shell:
+python -m sqlite3 app.db < adopt.sql  # Python 3.12+, which echoes its prompts
+```
+
+A version counts when its newest goose row is applied, as goose counts it; goose's seed row
+for version 0 is left out. `goose_db_version` stays as it was, and can be dropped once the
+app runs on tinymigrate. Stop the app first, so nothing writes to the database meanwhile.
+Neither shell stops at an error, so the snippet is written to be safe to run again: if the
+app already started on tinymigrate without it, check what the rerun migrations did, then
+run `adopt.sql`; it adds the versions still missing.
 
 ## Development
 
@@ -330,6 +353,3 @@ uv run ruff check .
 uv run ty check
 uv run pytest
 ```
-
-Tests that compare the version table against goose need goose v3.28.0 on `PATH`; they
-skip without it.

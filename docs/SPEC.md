@@ -1,25 +1,19 @@
 # tinymigrate — spec
 
 A small, pure-Python library that applies SQL migration files to a database through
-SQLAlchemy (and so SQLModel). It replaces goose-py in small apps like simulacra and hearth,
-which today shell out to the `goose` Go binary at startup to run `up` on a SQLite file.
+SQLAlchemy (and so SQLModel), for small apps like simulacra and hearth that migrate a
+SQLite file at startup.
 
 ## Goals
 
-1. **No binary.** Plain Python on top of SQLAlchemy 2.x. No subprocess, no `GOOSE_*`
-   environment variables, no `.env` lookup. Everything is passed explicitly.
-2. **Simple migration files.** tinymigrate's own small syntax (below); an app's goose files
-   need their annotations rewritten once.
-3. **goose-compatible version table.** A database already migrated by goose (table
-   `goose_db_version`) is picked up where goose left off, and goose can read a database
-   tinymigrate migrated. Apps switch over without touching their databases.
+1. **No binary.** Plain Python on top of SQLAlchemy 2.x. No subprocess, no environment
+   variables, no `.env` lookup. Everything is passed explicitly.
+2. **Simple migration files.** tinymigrate's own small syntax (below).
+3. **A simple version table** of tinymigrate's own (below).
 4. **Works with SQLModel apps**, sync or async: takes a SQLAlchemy `Engine`, and an
    `AsyncEngine` (e.g. `sqlite+aiosqlite`) through an async entry point.
 
 ## Migration files
-
-tinymigrate's own syntax, not goose's: goose annotations (`-- +goose Up`, `StatementBegin`/`End`)
-are ordinary comments to it.
 
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
   `<version>` is a positive integer that fits in 64 bits (`00001_create_chat_log.sql`).
@@ -42,36 +36,30 @@ are ordinary comments to it.
 
 ## Version table
 
-Same shape goose v3 uses for sqlite3:
+One row per applied migration:
 
 ```sql
-CREATE TABLE goose_db_version (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    version_id INTEGER NOT NULL,
-    is_applied INTEGER NOT NULL,
-    tstamp TIMESTAMP DEFAULT (datetime('now'))
-);
+CREATE TABLE tinymigrate_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 ```
 
-Created on first use with a seed row `(version_id=0, is_applied=1)`, as goose does.
-Applying a migration inserts `(version, 1)`; rolling one back deletes its row(s).
-The table name is a parameter, defaulting to `goose_db_version`. Verify behaviour
-against the real goose binary (v3.28.0 is installed) rather than from memory.
+Created on first use, empty (no seed row). Applying a migration inserts its version with
+`applied_at` the UTC time in ISO-8601 (`2026-11-08T12:00:00.123456+00:00`); rolling one
+back deletes its row. The table name is a parameter, defaulting to `tinymigrate_migration`.
 
 ## Behaviour
 
-- `up`: apply every migration newer than the largest version in the version table (goose's
-  rule), in order. Each migration file runs in its own transaction together with its
-  version-table insert, so a failing migration leaves no partial schema and no version
-  row; earlier ones in the same run stay applied. `-- no transaction` files run statement by
-  statement, in autocommit. Running `up` on an up-to-date database does nothing.
-- `down`: roll back the migration of the current version (as `version` computes it) using
-  its down section, in one transaction with deleting every version-table row for that
-  version (`-- no transaction` files in autocommit, as for `up`). A database at version 0, a
-  current version with no file in the directory, and a migration with no down section
-  raise; an empty down section only deletes the rows.
-- `version`: the current version as goose computes it: walking rows newest first, the first
-  version whose newest row has `is_applied = 1` (0 for a fresh database).
+- `up`: apply every migration newer than the current version, in order. Each migration
+  file runs in its own transaction together with its version-table insert, so a failing
+  migration leaves no partial schema and no version row; earlier ones in the same run stay
+  applied. `-- no transaction` files run statement by statement, in autocommit. Running
+  `up` on an up-to-date database does nothing. A file older than the current version that
+  was never applied is skipped.
+- `down`: roll back the migration of the current version using its down section, in one
+  transaction with deleting its version-table row (`-- no transaction` files in
+  autocommit, as for `up`). A database at version 0, a current version with no file in the
+  directory, and a migration with no down section raise; an empty down section only
+  deletes the row.
+- `version`: the current version, `MAX(version)` in the version table (0 when it is empty).
 - Errors are subclasses of one package base exception and name the migration file where
   there is one.
 
@@ -83,5 +71,5 @@ migrations, locking. See `docs/FUTURE.md`.
 ## Done when
 
 simulacra's and hearth's migration directories, converted to tinymigrate's syntax, apply
-cleanly; a database migrated by goose is continued by tinymigrate, and goose reads the version
-tinymigrate leaves; the package installs from a GitHub tag the way goose-py does.
+cleanly; a database goose migrated, adopted with the README's one-off SQL, is continued by
+tinymigrate; the package installs from a GitHub tag.

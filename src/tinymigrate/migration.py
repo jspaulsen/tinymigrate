@@ -124,7 +124,7 @@ def collect_migrations(directory: str | Path) -> list[Migration]:
     except NotADirectoryError as error:
         raise MigrationParseError(f"migration directory {directory} is not a directory") from error
     except OSError as error:
-        raise MigrationParseError(f"cannot read the migration directory {directory}: {error.strerror}") from error
+        raise MigrationParseError(f"cannot read the migration directory {directory}: {error.strerror or error}") from error
     if not paths:
         raise MigrationParseError(f"no migration files found in {directory}")
     migrations: dict[int, Migration] = {}
@@ -156,7 +156,7 @@ def _read_lines(path: Path) -> list[str]:
     try:
         data = path.read_bytes()
     except OSError as error:
-        raise MigrationParseError(f"{path}: cannot read the migration file: {error.strerror}") from error
+        raise MigrationParseError(f"{path}: cannot read the migration file: {error.strerror or error}") from error
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
