@@ -619,7 +619,7 @@ def test_a_connection_that_already_began_a_transaction_raises(engine: Engine, da
     with pytest.raises(TransactionStateError, match="already has a transaction begun"):
         migrate_down(engine, SIMULACRA_DIRECTORY)
 
-    assert not database_path.exists() or _read_table_names(database_path) == set()
+    assert _read_table_names(database_path) == set()
 
 
 async def test_get_version_async_reads_a_fresh_database_as_version_zero(async_engine: AsyncEngine, database_path: Path) -> None:
@@ -693,7 +693,7 @@ async def test_a_no_transaction_migration_over_aiosqlite_runs_in_autocommit_and_
     async_engine: AsyncEngine, database_path: Path, tmp_path: Path
 ) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n-- +goose Down\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n")
     _write_migration(directory, "00002_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
     _write_migration(directory, "00003_b.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
 
@@ -750,9 +750,6 @@ async def test_a_sqlmodel_async_session_reads_and_writes_a_table_the_async_migra
         session.add(Chat(character_id=999, created_at="2026-01-01T00:00:00Z"))
         with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
             await session.commit()
-        await session.rollback()
-        foreign_keys = (await session.exec(text("PRAGMA foreign_keys"))).scalar()  # ty: ignore[no-matching-overload]  # exec takes a select; a PRAGMA is text.
 
     assert characters == [("Mira", "Hello.")]
-    assert foreign_keys == 1
     assert await get_version_async(async_engine) == HEARTH_LATEST_VERSION

@@ -73,7 +73,7 @@
     Every file in the directory is parsed before rolling back, as for `up`, so a malformed older file
     blocks gander's `down` where goose's CLI parses only the current version's file.
 16. **The async entry points are thin wrappers: each opens one `AsyncConnection` and hands the
-    sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of #11 is the
+    sync internals to `run_sync`.** No logic is duplicated, so the transaction scheme of decision 11 is the
     same over aiosqlite (whose adapter maps `AUTOCOMMIT` and commit/rollback onto `sqlite3`'s);
     tests that fail when the `BEGIN` or the `AUTOCOMMIT` is removed run over `sqlite+aiosqlite`
     too. The dependency is `sqlalchemy[asyncio]`, which adds greenlet: `sqlalchemy.ext.asyncio`
