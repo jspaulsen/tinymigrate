@@ -216,8 +216,8 @@ SQLAlchemy's own.
 
 ## Replacing goose-py
 
-simulacra and hearth call goose-py from a blocking `migrate`, which their FastAPI lifespan
-runs in a thread before the database opens:
+This recipe is for an app that uses goose-py at startup: a blocking `migrate` calls goose-py,
+and the app's FastAPI lifespan runs it in a thread before the database opens:
 
 ```python
 def migrate(path: Path, *, migrations: Path = MIGRATIONS) -> None:
@@ -270,16 +270,16 @@ To switch to tinymigrate:
            engine.dispose()
    ```
 
-   hearth's `migrate(path)` takes no `migrations=` and passes `MIGRATIONS` directly; keep
+   If the app's `migrate(path)` takes no `migrations=` and passes `MIGRATIONS` directly, keep
    that. In the app, `tinymigrate` is a third-party package like `sqlalchemy`, so its import goes in
    the same block, sorted alphabetically, or ruff's isort (`I001`) fails. Every caller of
-   `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, hearth's
-   eval CLI, schema tooling and tests. The engine is a plain one without the app's
+   `migrate` stays as it is: the lifespan's `asyncio.to_thread(migrate, path)`, any
+   CLI, schema tooling and tests. The engine is a plain one without the app's
    connect-event PRAGMAs, so the `PRAGMA foreign_keys` caveat above does not apply.
 4. Point what reads the version table at tinymigrate's: the tests' `SELECT
    max(version_id) FROM goose_db_version` becomes `SELECT max(version) FROM
-   tinymigrate_migration` (`tests/test_migrate.py` and `tests/test_lifespan.py` in both
-   apps), and `generate_schema_sql` in `tests/schema_tools.py` drops
+   tinymigrate_migration` (for example in `tests/test_migrate.py` and `tests/test_lifespan.py`),
+   and a schema-dump helper such as `generate_schema_sql` in `tests/schema_tools.py` drops
    `tinymigrate_migration` instead of `goose_db_version` before dumping, since its
    `applied_at` values differ on every run.
 5. Delete what only goose-py needed:
@@ -290,19 +290,15 @@ To switch to tinymigrate:
    - Every `shutil.which("goose") is None and not os.environ.get("GOOSE_BINARY")` skip on
      a test that only needed goose to migrate, with the `os`/`shutil` imports it used and
      `pytest` where nothing else uses it, or those tests skip silently once goose is gone.
-     simulacra has one, in `tests/test_schema_sync.py`; hearth has a module-level
-     `pytestmark` in `test_migrate.py` (its only use of `pytest`) and `test_lifespan.py`,
-     the `needs_goose` decorator in `test_eval_cli.py`, and the skip in
-     `test_schema_sync.py`.
-   - A CI "Install goose" step and its `GOOSE_VERSION` env (simulacra's
-     `.github/workflows/ci.yml`).
+     Such a skip can sit on a single test, in a module-level `pytestmark` (which may be
+     the module's only use of `pytest`), or a shared decorator such as `needs_goose`.
+   - A CI "Install goose" step and its `GOOSE_VERSION` env, if the workflow has one.
    - Text naming goose-py or a required goose binary: `migrate`'s old docstring ("goose
      runs as a subprocess", "Raises goose-py's `GooseError`"), the `GooseNotFoundError`
-     line in `generate_schema_sql`'s docstring and its "goose's bookkeeping table" comment
-     (`tests/schema_tools.py` in both apps), simulacra's CLAUDE.md "goose-py's subprocess"
-     example of a blocking call, and any README, CLAUDE.md or decisions text saying the app
-     needs goose on `PATH` or `GOOSE_BINARY` (simulacra's README and CLAUDE.md; hearth's
-     README and `docs/decisions.md`), and text calling the files goose migrations.
+     line in `generate_schema_sql`'s docstring and its "goose's bookkeeping table" comment,
+     any "goose-py's subprocess" example of a blocking call in the app's docs, any README,
+     CLAUDE.md or decisions text saying the app needs goose on `PATH` or `GOOSE_BINARY`, and
+     text calling the files goose migrations.
 6. Adopt every existing database goose migrated, once, before the app first starts on
    tinymigrate (below).
 
@@ -319,8 +315,8 @@ force while migrating.
 
 tinymigrate does not read `goose_db_version`. On a database goose migrated it sees version 0
 and runs every migration again from the first, until one fails (`table ... already
-exists`); any before it that succeed are applied a second time and recorded, as
-simulacra's `SELECT 1` first migration would be. So before the app first starts on
+exists`); any before it that succeed are applied a second time and recorded, as a
+first migration of just `SELECT 1` would be. So before the app first starts on
 tinymigrate, copy the applied versions across once, with this SQL saved as `adopt.sql`:
 
 ```sql

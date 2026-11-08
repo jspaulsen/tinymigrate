@@ -1,7 +1,7 @@
 # tinymigrate — spec
 
 A small, pure-Python library that applies SQL migration files to a database through
-SQLAlchemy (and so SQLModel), for small apps like simulacra and hearth that migrate a
+SQLAlchemy (and so SQLModel), for small SQLModel apps that migrate a
 SQLite file at startup.
 
 ## Goals
@@ -70,6 +70,6 @@ migrations, locking. See `docs/FUTURE.md`.
 
 ## Done when
 
-simulacra's and hearth's migration directories, converted to tinymigrate's syntax, apply
+The migration directories of two small SQLModel apps, converted to tinymigrate's syntax, apply
 cleanly; a database goose migrated, adopted with the README's one-off SQL, is continued by
 tinymigrate; the package installs from a GitHub tag.

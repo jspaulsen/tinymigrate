@@ -1,6 +1,6 @@
 -- up
 -- The name the user gave the chat. NULL until renamed: the chat is then shown under its default
--- title, the SillyTavern file name for a live import, else the character's current name.
+-- title, the source file name for a live import, else the character's current name.
 ALTER TABLE chats ADD COLUMN title TEXT;
 
 -- A chat's log is deleted only as a whole, with its chat (decision 99): an event may be deleted

@@ -7,12 +7,12 @@ import pytest
 import tinymigrate
 from tinymigrate import Migration, MigrationParseError, TinymigrateError, collect_migrations, parse_migration
 
-# The real migration directories of hearth and simulacra, converted to tinymigrate syntax.
+# The real migration directories of two small SQLModel apps, converted to tinymigrate syntax.
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures"
 
 # (file name, up statement count, down statement count) for every fixture file, as the
 # files ran under goose before they were converted to tinymigrate's syntax.
-HEARTH_STATEMENT_COUNTS = [
+CHAT_APP_STATEMENT_COUNTS = [
     ("00001_create_chat_log.sql", 7, 5),
     ("00002_add_card_fields_and_import.sql", 21, 5),
     ("00003_create_last_prompts.sql", 1, 1),
@@ -21,15 +21,15 @@ HEARTH_STATEMENT_COUNTS = [
     ("00006_create_reply_prompts.sql", 3, 2),
     ("00007_add_chat_title_and_chat_deletion.sql", 3, 3),
 ]
-SIMULACRA_STATEMENT_COUNTS = [
+PERSONA_APP_STATEMENT_COUNTS = [
     ("00001_init.sql", 1, 1),
     ("00002_create_personas.sql", 2, 1),
     ("00003_create_conversations.sql", 3, 2),
     ("00004_add_persona_voice.sql", 2, 2),
 ]
 
-# hearth 00001's first trigger, whose body holds a `;` of its own.
-HEARTH_UPDATE_TRIGGER = """CREATE TRIGGER events_refuse_update BEFORE UPDATE ON events
+# chat_app 00001's first trigger, whose body holds a `;` of its own.
+CHAT_APP_UPDATE_TRIGGER = """CREATE TRIGGER events_refuse_update BEFORE UPDATE ON events
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only');
 END;"""
@@ -52,9 +52,9 @@ def test_the_parser_names_are_importable_from_the_package_root() -> None:
     assert issubclass(tinymigrate.MigrationParseError, TinymigrateError)
 
 
-@pytest.mark.parametrize(("name", "up_count", "down_count"), HEARTH_STATEMENT_COUNTS)
-def test_every_hearth_migration_parses_with_its_statement_counts(name: str, up_count: int, down_count: int) -> None:
-    migration = parse_migration(FIXTURE_DIRECTORY / "hearth" / name)
+@pytest.mark.parametrize(("name", "up_count", "down_count"), CHAT_APP_STATEMENT_COUNTS)
+def test_every_chat_app_migration_parses_with_its_statement_counts(name: str, up_count: int, down_count: int) -> None:
+    migration = parse_migration(FIXTURE_DIRECTORY / "chat_app" / name)
 
     assert len(migration.up_statements) == up_count
     assert migration.down_statements is not None
@@ -62,9 +62,9 @@ def test_every_hearth_migration_parses_with_its_statement_counts(name: str, up_c
     assert migration.use_transaction
 
 
-@pytest.mark.parametrize(("name", "up_count", "down_count"), SIMULACRA_STATEMENT_COUNTS)
-def test_every_simulacra_migration_parses_with_its_statement_counts(name: str, up_count: int, down_count: int) -> None:
-    migration = parse_migration(FIXTURE_DIRECTORY / "simulacra" / name)
+@pytest.mark.parametrize(("name", "up_count", "down_count"), PERSONA_APP_STATEMENT_COUNTS)
+def test_every_persona_app_migration_parses_with_its_statement_counts(name: str, up_count: int, down_count: int) -> None:
+    migration = parse_migration(FIXTURE_DIRECTORY / "persona_app" / name)
 
     assert len(migration.up_statements) == up_count
     assert migration.down_statements is not None
@@ -73,13 +73,13 @@ def test_every_simulacra_migration_parses_with_its_statement_counts(name: str, u
 
 
 def test_a_trigger_body_with_semicolons_is_one_statement_without_markers() -> None:
-    migration = parse_migration(FIXTURE_DIRECTORY / "hearth" / "00001_create_chat_log.sql")
+    migration = parse_migration(FIXTURE_DIRECTORY / "chat_app" / "00001_create_chat_log.sql")
 
-    assert migration.up_statements[5] == HEARTH_UPDATE_TRIGGER
+    assert migration.up_statements[5] == CHAT_APP_UPDATE_TRIGGER
 
 
 def test_the_version_and_description_come_from_the_file_name() -> None:
-    path = FIXTURE_DIRECTORY / "hearth" / "00004_create_connections.sql"
+    path = FIXTURE_DIRECTORY / "chat_app" / "00004_create_connections.sql"
 
     migration = parse_migration(path)
 
@@ -89,7 +89,7 @@ def test_the_version_and_description_come_from_the_file_name() -> None:
 
 
 def test_comments_and_blank_lines_before_the_up_marker_are_ignored() -> None:
-    migration = parse_migration(FIXTURE_DIRECTORY / "simulacra" / "00001_init.sql")
+    migration = parse_migration(FIXTURE_DIRECTORY / "persona_app" / "00001_init.sql")
 
     assert migration.up_statements == ("SELECT 1;",)
     assert migration.down_statements == ("SELECT 1;",)
@@ -259,8 +259,8 @@ def test_collecting_two_files_with_the_same_version_raises(tmp_path: Path) -> No
 
 
 def test_collecting_the_fixture_directories_returns_every_file() -> None:
-    assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "hearth")] == [1, 2, 3, 4, 5, 6, 7]
-    assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "simulacra")] == [1, 2, 3, 4]
+    assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "chat_app")] == [1, 2, 3, 4, 5, 6, 7]
+    assert [migration.version for migration in collect_migrations(FIXTURE_DIRECTORY / "persona_app")] == [1, 2, 3, 4]
 
 
 @pytest.mark.parametrize("names", [[], ["README.md"]], ids=["no_files", "no_sql_files"])
@@ -348,7 +348,7 @@ def test_a_file_that_is_not_utf8_raises_naming_the_file_and_line(tmp_path: Path)
 
 
 def test_the_parser_accepts_a_str_path() -> None:
-    simulacra_directory = FIXTURE_DIRECTORY / "simulacra"
+    persona_app_directory = FIXTURE_DIRECTORY / "persona_app"
 
-    assert [migration.version for migration in collect_migrations(str(simulacra_directory))] == [1, 2, 3, 4]
-    assert parse_migration(str(simulacra_directory / "00001_init.sql")).path == simulacra_directory / "00001_init.sql"
+    assert [migration.version for migration in collect_migrations(str(persona_app_directory))] == [1, 2, 3, 4]
+    assert parse_migration(str(persona_app_directory / "00001_init.sql")).path == persona_app_directory / "00001_init.sql"
