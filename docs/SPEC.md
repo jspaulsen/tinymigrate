@@ -63,14 +63,16 @@ against the real goose binary (v3.28.0 is installed) rather than from memory.
 
 ## Behaviour
 
-- `up`: apply every migration newer than the current version, in order. Each migration
+- `up`: apply every migration newer than the largest version in the version table (goose's
+  rule), in order. Each migration
   file runs in its own transaction together with its version-table insert, so a failing
   migration leaves no partial schema and no version row; earlier ones in the same run
   stay applied. `NO TRANSACTION` files run statement by statement, in autocommit.
   Running `up` on an up-to-date database does nothing.
 - `down`: roll back the newest applied migration using its Down section. A migration
   with no Down section raises.
-- `version`: the current version (0 for a fresh database).
+- `version`: the current version as goose computes it: walking rows newest first, the first
+  version whose newest row has `is_applied = 1` (0 for a fresh database).
 - Errors are subclasses of one package base exception and name the migration file.
 
 ## Out of scope for the MVP
