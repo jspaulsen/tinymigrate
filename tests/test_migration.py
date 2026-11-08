@@ -348,7 +348,7 @@ def test_edge_case_statements_match_what_goose_executes(tmp_path: Path) -> None:
     _assert_statements_match_goose(directory, tmp_path / "goose.db")
 
 
-@pytest.mark.parametrize("names", [[], ["README.md"]])
+@pytest.mark.parametrize("names", [[], ["README.md"]], ids=["no_files", "no_sql_files"])
 def test_collecting_a_directory_with_no_migration_files_raises_naming_it(tmp_path: Path, names: list[str]) -> None:
     for name in names:
         _write_migration(tmp_path, name, "not a migration")
