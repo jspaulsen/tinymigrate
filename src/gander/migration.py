@@ -1,26 +1,20 @@
 import re
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from gander.errors import MigrationParseError
 
-# goose's file name rule: a version, `_`, then a description. goose rejects `2.sql` for
-# its missing `_`; unlike goose's `strconv.ParseInt`, a sign (`+3_x.sql`) is rejected too.
+# A file name is a version, `_`, then a description; `2.sql` and a signed `+3_x.sql` are rejected.
 _FILE_NAME_PATTERN = re.compile(r"(?P<version>[0-9]+)_(?P<description>.*)\.sql")
 
-# goose parses versions as int64 and SQLite stores `version_id` as a signed 64-bit integer.
+# SQLite stores `version_id` as a signed 64-bit integer.
 _MAX_VERSION = 2**63 - 1
 
-# The annotations goose v3.28.0 knows, spelled as goose spells them; matched case-insensitively.
-_UP = "Up"
-_DOWN = "Down"
-_STATEMENT_BEGIN = "StatementBegin"
-_STATEMENT_END = "StatementEnd"
-_NO_TRANSACTION = "NO TRANSACTION"
-_ANNOTATIONS = (_UP, _DOWN, _STATEMENT_BEGIN, _STATEMENT_END, _NO_TRANSACTION)
-
-# goose's environment-variable substitution annotations, which gander does not implement.
-_UNSUPPORTED_ANNOTATIONS = ("ENVSUB ON", "ENVSUB OFF")
+# The markers, each a whole line compared after stripping whitespace and case-folding.
+_UP_MARKER = "-- up"
+_DOWN_MARKER = "-- down"
+_NO_TRANSACTION_MARKER = "-- no transaction"
 
 
 @dataclass(frozen=True)
@@ -28,8 +22,8 @@ class Migration:
     """
     A parsed migration file: its version and the statements of each direction.
 
-    `down_statements` is `None` when the file has no `-- +goose Down` annotation, and an
-    empty tuple when it has one with nothing under it.
+    `down_statements` is `None` when the file has no `-- down` marker, and an empty tuple
+    when it has one with nothing under it.
     """
 
     version: int
@@ -42,84 +36,55 @@ class Migration:
 
 def parse_migration(path: str | Path) -> Migration:
     """
-    Parse one goose-style SQL migration file.
+    Parse one SQL migration file.
 
-    Splits statements as goose v3.28.0 does: a statement ends at a line whose last word
-    before any `--` comment ends in `;`, and a `StatementBegin`/`StatementEnd` block is
-    one statement. Both directions are parsed, so a malformed Down section raises too.
-    Raises `MigrationParseError` naming the file, and the line where there is one.
+    A statement is the lines accumulated until `sqlite3.complete_statement` accepts them,
+    so a trigger body's `;` does not end it; comment-only leftovers are dropped. Both
+    directions are parsed, so a malformed down section raises too. Raises
+    `MigrationParseError` naming the file, and the line where there is one.
     """
     path = Path(path)
     version, description = _parse_file_name(path)
-    up_statements: list[str] = []
+    up_statements: list[str] | None = None
     down_statements: list[str] | None = None
     current: list[str] | None = None
     use_transaction = True
-    in_block = False
-    block_line_number = 0
     buffer: list[str] = []
     buffer_line_number = 0
 
     for line_number, line in enumerate(_read_lines(path), start=1):
         stripped = line.strip()
-        if current is None and not stripped:
-            continue
-        if stripped.startswith("--") and "+goose" in line:
-            annotation = _parse_annotation(path, line_number, line)
-            if annotation == _UP:
-                if current is not None:
-                    raise MigrationParseError(f"{path}:{line_number}: duplicate '-- +goose Up' annotation")
-                current = up_statements
-            elif annotation == _DOWN:
-                if current is None:
-                    raise MigrationParseError(f"{path}:{line_number}: '-- +goose Down' before '-- +goose Up'")
-                if in_block:
-                    raise MigrationParseError(f"{path}:{block_line_number}: '-- +goose StatementBegin' without '-- +goose StatementEnd'")
-                if down_statements is not None:
-                    raise MigrationParseError(f"{path}:{line_number}: duplicate '-- +goose Down' annotation")
-                if "\n".join(buffer).strip():
-                    raise MigrationParseError(f"{path}:{buffer_line_number}: statement has no terminating ';'")
-                buffer = []
-                down_statements = []
-                current = down_statements
-            elif annotation == _STATEMENT_BEGIN:
-                if current is None:
-                    raise MigrationParseError(f"{path}:{line_number}: '-- +goose StatementBegin' before '-- +goose Up'")
-                if in_block:
-                    raise MigrationParseError(f"{path}:{line_number}: nested '-- +goose StatementBegin'")
-                in_block = True
-                block_line_number = line_number
-            elif annotation == _STATEMENT_END:
-                if current is None or not in_block:
-                    raise MigrationParseError(f"{path}:{line_number}: '-- +goose StatementEnd' without '-- +goose StatementBegin'")
-                if statement := "\n".join(buffer).strip():
-                    current.append(statement)
-                buffer = []
-                in_block = False
-            else:
-                use_transaction = False
-            continue
-
-        # goose's check, kept exact: only an empty line is skipped here, so a whitespace-only
-        # line starts a statement and the comments after it become part of that statement.
-        if not buffer and (not line or stripped.startswith("--")):
-            continue
-        if current is None:
-            raise MigrationParseError(f"{path}:{line_number}: SQL before the '-- +goose Up' annotation")
-        # A whitespace-only line can open the buffer; errors name the first line with text.
-        if stripped and not any(part.strip() for part in buffer):
-            buffer_line_number = line_number
-        buffer.append(line)
-        if not in_block and _ends_statement(line):
-            current.append("\n".join(buffer).strip())
+        marker = stripped.casefold()
+        if marker == _NO_TRANSACTION_MARKER:
+            if current is not None:
+                raise MigrationParseError(f"{path}:{line_number}: '{_NO_TRANSACTION_MARKER}' marker after '{_UP_MARKER}'")
+            use_transaction = False
+        elif marker == _UP_MARKER:
+            if current is not None:
+                raise MigrationParseError(f"{path}:{line_number}: duplicate '{_UP_MARKER}' marker")
+            up_statements = current = []
+        elif marker == _DOWN_MARKER:
+            if current is None:
+                raise MigrationParseError(f"{path}:{line_number}: '{_DOWN_MARKER}' marker before '{_UP_MARKER}'")
+            if down_statements is not None:
+                raise MigrationParseError(f"{path}:{line_number}: duplicate '{_DOWN_MARKER}' marker")
+            _check_section_end(path, buffer, buffer_line_number)
             buffer = []
+            down_statements = current = []
+        elif current is None:
+            if stripped and not stripped.startswith("--"):
+                raise MigrationParseError(f"{path}:{line_number}: SQL before the '{_UP_MARKER}' marker")
+        elif buffer or stripped:
+            if not buffer:
+                buffer_line_number = line_number
+            buffer.append(line)
+            if sqlite3.complete_statement(statement := "\n".join(buffer)):
+                current.append(statement.strip())
+                buffer = []
 
-    if current is None:
-        raise MigrationParseError(f"{path}: no '-- +goose Up' annotation")
-    if in_block:
-        raise MigrationParseError(f"{path}:{block_line_number}: '-- +goose StatementBegin' without '-- +goose StatementEnd'")
-    if "\n".join(buffer).strip():
-        raise MigrationParseError(f"{path}:{buffer_line_number}: statement has no terminating ';'")
+    if up_statements is None:
+        raise MigrationParseError(f"{path}: no '{_UP_MARKER}' marker")
+    _check_section_end(path, buffer, buffer_line_number)
 
     return Migration(
         version=version,
@@ -135,11 +100,17 @@ def collect_migrations(directory: str | Path) -> list[Migration]:
     """
     Parse every `.sql` file in a directory, ordered by integer version.
 
-    Other files and subdirectories are ignored. Raises `MigrationParseError` when a file
-    is malformed, two files share a version or, as goose does, there is no `.sql` file.
+    Other files and subdirectories are ignored. Raises `MigrationParseError` when
+    `directory` is missing or not a directory, a file is malformed, two files share a
+    version or there is no `.sql` file.
     """
     directory = Path(directory)
-    paths = sorted(path for path in directory.iterdir() if path.suffix == ".sql" and path.is_file())
+    try:
+        paths = sorted(path for path in directory.iterdir() if path.suffix == ".sql" and path.is_file())
+    except FileNotFoundError as error:
+        raise MigrationParseError(f"migration directory {directory} does not exist") from error
+    except NotADirectoryError as error:
+        raise MigrationParseError(f"migration directory {directory} is not a directory") from error
     if not paths:
         raise MigrationParseError(f"no migration files found in {directory}")
     migrations: dict[int, Migration] = {}
@@ -167,7 +138,7 @@ def _parse_file_name(path: Path) -> tuple[int, str]:
 
 def _read_lines(path: Path) -> list[str]:
     # Decoded by hand rather than with `read_text`, whose universal newlines would turn a
-    # lone `\r` inside a string literal into `\n`; goose only drops the `\r` of a `\r\n`.
+    # lone `\r` inside a string literal into `\n`; only the `\r` of a `\r\n` is dropped.
     data = path.read_bytes()
     try:
         text = data.decode("utf-8")
@@ -178,29 +149,6 @@ def _read_lines(path: Path) -> list[str]:
     return [line.removesuffix("\r") for line in text.split("\n")]
 
 
-def _parse_annotation(path: Path, line_number: int, line: str) -> str:
-    # goose rejects an indented annotation rather than treating it as a comment.
-    if line[:1] in (" ", "\t"):
-        raise MigrationParseError(f"{path}:{line_number}: annotation must start at the beginning of the line")
-    command = line.replace("--", "").replace("+goose", "", 1)
-    if "+goose" in command:
-        raise MigrationParseError(f"{path}:{line_number}: more than one '+goose' in annotation")
-    command = command.strip()
-    for annotation in _UNSUPPORTED_ANNOTATIONS:
-        if command.casefold() == annotation.casefold():
-            raise MigrationParseError(f"{path}:{line_number}: annotation {annotation!r} is not supported")
-    for annotation in _ANNOTATIONS:
-        if command.casefold() == annotation.casefold():
-            return annotation
-    raise MigrationParseError(f"{path}:{line_number}: unknown annotation {command!r}, expected one of {', '.join(_ANNOTATIONS)}")
-
-
-def _ends_statement(line: str) -> bool:
-    # goose's rule: the last whitespace-separated word before one starting with `--`.
-    last_word = ""
-    for word in line.split():
-        if word.startswith("--"):
-            break
-        last_word = word
-
-    return last_word.endswith(";")
+def _check_section_end(path: Path, buffer: list[str], buffer_line_number: int) -> None:
+    if any(line.strip() and not line.strip().startswith("--") for line in buffer):
+        raise MigrationParseError(f"{path}:{buffer_line_number}: incomplete statement, expected it to end with ';'")

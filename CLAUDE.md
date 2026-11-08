@@ -1,7 +1,7 @@
 # gander
 
-A pure-Python, SQLAlchemy-based replacement for goose-py: it applies goose-compatible SQL
-migration files and keeps goose's `goose_db_version` table, with no goose binary.
+A pure-Python, SQLAlchemy-based replacement for goose-py: it applies SQL migration files in
+its own simple syntax and keeps goose's `goose_db_version` table, with no goose binary.
 `docs/SPEC.md` is what the package does, `docs/PLAN.md` the order it is built in.
 
 ## Scope

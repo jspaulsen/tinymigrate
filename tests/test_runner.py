@@ -159,8 +159,8 @@ def test_migrate_up_applies_only_migrations_newer_than_the_current_version(engin
 
 def test_a_failing_statement_rolls_back_its_migration_only(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
-    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00002_b.sql", "-- up\nCREATE TABLE b (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match=r"00002_b\.sql: .*no such table: missing") as raised:
         migrate_up(engine, directory)
@@ -173,7 +173,7 @@ def test_a_failing_statement_rolls_back_its_migration_only(engine: Engine, datab
 
 def test_a_failing_no_transaction_migration_keeps_its_earlier_statements_and_records_no_version(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE a (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- no transaction\n-- up\nCREATE TABLE a (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match=r"00001_a\.sql: "):
         migrate_up(engine, directory)
@@ -184,8 +184,8 @@ def test_a_failing_no_transaction_migration_keeps_its_earlier_statements_and_rec
 
 def test_a_failing_no_transaction_migration_keeps_rows_its_earlier_statements_inserted(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
-    _write_migration(directory, "00002_b.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00002_b.sql", "-- no transaction\n-- up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match=r"00002_b\.sql: "):
         migrate_up(engine, directory)
@@ -197,7 +197,7 @@ def test_a_failing_no_transaction_migration_keeps_rows_its_earlier_statements_in
 
 def test_a_no_transaction_migration_can_run_a_statement_sqlite_refuses_in_a_transaction(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- no transaction\n-- up\nVACUUM;\n")
 
     migrate_up(engine, directory)
 
@@ -206,7 +206,7 @@ def test_a_no_transaction_migration_can_run_a_statement_sqlite_refuses_in_a_tran
 
 def test_a_transactional_migration_runs_inside_a_transaction(engine: Engine, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose Up\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- up\nVACUUM;\n")
 
     with pytest.raises(MigrationExecutionError, match="cannot VACUUM from within a transaction"):
         migrate_up(engine, directory)
@@ -214,7 +214,7 @@ def test_a_transactional_migration_runs_inside_a_transaction(engine: Engine, tmp
 
 def test_a_parsed_statement_holding_several_sql_statements_runs_them_all(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_x.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER); CREATE TABLE b (\n    x INTEGER\n);\n")
+    _write_migration(directory, "00001_x.sql", "-- up\nCREATE TABLE a (x INTEGER); CREATE TABLE b (\n    x INTEGER\n);\n")
 
     migrate_up(engine, directory)
 
@@ -223,7 +223,7 @@ def test_a_parsed_statement_holding_several_sql_statements_runs_them_all(engine:
 
 def test_a_failure_in_the_second_of_two_sql_statements_rolls_back_the_first(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_x.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER); INSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_x.sql", "-- up\nCREATE TABLE a (x INTEGER); INSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match="no such table: missing"):
         migrate_up(engine, directory)
@@ -235,7 +235,7 @@ def test_a_trigger_body_with_semicolons_runs_as_one_statement(engine: Engine, da
     directory = tmp_path / "migrations"
     trigger = "CREATE TRIGGER t AFTER INSERT ON a BEGIN\n    INSERT INTO b VALUES (new.x);\n    INSERT INTO b VALUES (new.x);\nEND;\n"
     tables = "CREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n"
-    migration_text = f"-- +goose Up\n{tables}-- +goose StatementBegin\n{trigger}-- +goose StatementEnd\nINSERT INTO a VALUES (1);\n"
+    migration_text = f"-- up\n{tables}{trigger}INSERT INTO a VALUES (1);\n"
     _write_migration(directory, "00001_x.sql", migration_text)
 
     migrate_up(engine, directory)
@@ -246,7 +246,7 @@ def test_a_trigger_body_with_semicolons_runs_as_one_statement(engine: Engine, da
 
 def test_a_colon_name_inside_a_string_literal_is_not_a_bind_parameter(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_x.sql", "-- +goose Up\nCREATE TABLE a (x TEXT);\nINSERT INTO a VALUES (':name %s %(x)s');\n")
+    _write_migration(directory, "00001_x.sql", "-- up\nCREATE TABLE a (x TEXT);\nINSERT INTO a VALUES (':name %s %(x)s');\n")
 
     migrate_up(engine, directory)
 
@@ -256,7 +256,7 @@ def test_a_colon_name_inside_a_string_literal_is_not_a_bind_parameter(engine: En
 
 def test_a_trailing_comment_after_the_last_statement_is_harmless(engine: Engine, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_x.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER); -- note\n")
+    _write_migration(directory, "00001_x.sql", "-- up\nCREATE TABLE a (x INTEGER); -- note\n")
 
     migrate_up(engine, directory)
 
@@ -307,7 +307,7 @@ def test_a_database_other_than_sqlite_raises(tmp_path: Path) -> None:
 
 def test_a_failing_commit_rolls_back_its_migration(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    migration_text = "-- +goose Up\nPRAGMA defer_foreign_keys = ON;\nCREATE TABLE a (x INTEGER REFERENCES a (y), y INTEGER UNIQUE);\nINSERT INTO a VALUES (1, NULL);\n"
+    migration_text = "-- up\nPRAGMA defer_foreign_keys = ON;\nCREATE TABLE a (x INTEGER REFERENCES a (y), y INTEGER UNIQUE);\nINSERT INTO a VALUES (1, NULL);\n"
     _write_migration(directory, "00001_x.sql", migration_text)
     event.listen(engine, "connect", lambda dbapi_connection, _record: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
 
@@ -320,10 +320,10 @@ def test_a_failing_commit_rolls_back_its_migration(engine: Engine, database_path
 
 def test_a_missing_migration_older_than_the_largest_version_is_skipped(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
-    _write_migration(directory, "00003_c.sql", "-- +goose Up\nCREATE TABLE c (x INTEGER);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00003_c.sql", "-- up\nCREATE TABLE c (x INTEGER);\n")
     migrate_up(engine, directory)
-    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n")
+    _write_migration(directory, "00002_b.sql", "-- up\nCREATE TABLE b (x INTEGER);\n")
 
     migrate_up(engine, directory)
 
@@ -354,48 +354,12 @@ def test_the_version_table_matches_the_one_goose_creates(engine: Engine, databas
 
 
 @requires_goose
-@pytest.mark.parametrize("directory", [HEARTH_DIRECTORY, SIMULACRA_DIRECTORY], ids=["hearth", "simulacra"])
-def test_the_schema_matches_the_one_goose_builds(engine: Engine, database_path: Path, tmp_path: Path, directory: Path) -> None:
-    goose_database = tmp_path / "goose.db"
-    _run_goose(directory, goose_database, "up")
-
-    migrate_up(engine, directory)
-
-    assert _read_schema(database_path) == _read_schema(goose_database)
-    assert _read_version_rows(database_path) == _read_version_rows(goose_database)
-
-
-@requires_goose
 def test_goose_reads_the_same_version_as_get_version_when_a_row_is_not_applied(engine: Engine, database_path: Path) -> None:
     migrate_up(engine, SIMULACRA_DIRECTORY)
     with sqlite3.connect(database_path) as connection:
         connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (4, 0)")
 
     assert f"goose: version {get_version(engine)}" in _run_goose(SIMULACRA_DIRECTORY, database_path, "version")
-
-
-@requires_goose
-@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
-def test_gander_continues_a_database_goose_migrated_part_way(engine: Engine, database_path: Path, directory: Path, latest: int) -> None:
-    _run_goose(directory, database_path, "up-to", "2")
-
-    migrate_up(engine, directory)
-
-    assert get_version(engine) == latest
-    assert f"goose: version {latest}" in _run_goose(directory, database_path, "version")
-    assert "Pending" not in _run_goose(directory, database_path, "status")
-
-
-@requires_goose
-@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
-def test_goose_continues_a_database_gander_migrated_part_way(engine: Engine, database_path: Path, tmp_path: Path, directory: Path, latest: int) -> None:
-    migrate_up(engine, _copy_first_migrations(directory, tmp_path / "partial", 2))
-    assert "Pending" in _run_goose(directory, database_path, "status")
-
-    _run_goose(directory, database_path, "up")
-
-    assert get_version(engine) == latest
-    assert _read_version_rows(database_path) == [(version, 1) for version in range(latest + 1)]
 
 
 def test_migrate_down_rolls_back_the_newest_migration_and_deletes_its_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
@@ -416,8 +380,8 @@ def test_migrate_down_rolls_back_the_newest_migration_and_deletes_its_row(engine
 
 def test_migrate_down_deletes_every_row_of_the_rolled_back_version(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\n")
-    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n-- +goose Down\nDROP TABLE b;\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n-- down\nDROP TABLE a;\n")
+    _write_migration(directory, "00002_b.sql", "-- up\nCREATE TABLE b (x INTEGER);\n-- down\nDROP TABLE b;\n")
     migrate_up(engine, directory)
     with sqlite3.connect(database_path) as connection:
         connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 1)")
@@ -429,8 +393,8 @@ def test_migrate_down_deletes_every_row_of_the_rolled_back_version(engine: Engin
 
 def test_migrate_down_rolls_back_the_current_version_not_the_largest(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\n")
-    _write_migration(directory, "00002_b.sql", "-- +goose Up\nCREATE TABLE b (x INTEGER);\n-- +goose Down\nDROP TABLE b;\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n-- down\nDROP TABLE a;\n")
+    _write_migration(directory, "00002_b.sql", "-- up\nCREATE TABLE b (x INTEGER);\n-- down\nDROP TABLE b;\n")
     migrate_up(engine, directory)
     with sqlite3.connect(database_path) as connection:
         connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 0)")
@@ -462,10 +426,10 @@ def test_migrate_down_raises_when_the_current_versions_file_is_missing(engine: E
 
 def test_migrate_down_raises_for_a_migration_without_a_down_section(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n")
     migrate_up(engine, directory)
 
-    with pytest.raises(MigrationRollbackError, match=r"00001_a\.sql: .*no -- \+goose Down section"):
+    with pytest.raises(MigrationRollbackError, match=r"00001_a\.sql: .*no -- down section"):
         migrate_down(engine, directory)
 
     assert "a" in _read_table_names(database_path)
@@ -474,7 +438,7 @@ def test_migrate_down_raises_for_a_migration_without_a_down_section(engine: Engi
 
 def test_migrate_down_with_an_empty_down_section_only_deletes_the_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n-- down\n")
     migrate_up(engine, directory)
 
     migrate_down(engine, directory)
@@ -485,7 +449,7 @@ def test_migrate_down_with_an_empty_down_section_only_deletes_the_row(engine: En
 
 def test_a_failing_down_leaves_the_schema_and_version_row_intact(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n-- down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
     migrate_up(engine, directory)
     schema = _read_schema(database_path)
 
@@ -498,7 +462,7 @@ def test_a_failing_down_leaves_the_schema_and_version_row_intact(engine: Engine,
 
 def test_a_no_transaction_down_runs_in_autocommit(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n-- +goose Down\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- no transaction\n-- up\nVACUUM;\n-- down\nVACUUM;\n")
     migrate_up(engine, directory)
 
     migrate_down(engine, directory)
@@ -508,7 +472,7 @@ def test_a_no_transaction_down_runs_in_autocommit(engine: Engine, database_path:
 
 def test_a_transactional_down_runs_inside_a_transaction(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose Up\nSELECT 1;\n-- +goose Down\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- up\nSELECT 1;\n-- down\nVACUUM;\n")
     migrate_up(engine, directory)
 
     with pytest.raises(MigrationExecutionError, match="cannot VACUUM from within a transaction"):
@@ -532,50 +496,6 @@ def test_rolling_every_migration_back_and_reapplying_gives_the_same_schema(engin
     assert get_version(engine) == latest
 
 
-@requires_goose
-@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
-def test_goose_down_and_migrate_down_leave_the_same_database(engine: Engine, database_path: Path, tmp_path: Path, directory: Path, latest: int) -> None:
-    goose_database = tmp_path / "goose.db"
-    migrate_up(engine, directory)
-    shutil.copy(database_path, goose_database)
-
-    _run_goose(directory, goose_database, "down")
-    migrate_down(engine, directory)
-
-    assert _read_schema(database_path) == _read_schema(goose_database)
-    assert _read_version_rows(database_path) == _read_version_rows(goose_database)
-    assert get_version(engine) == latest - 1
-
-
-@requires_goose
-@pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
-def test_goose_reads_the_version_migrate_down_leaves_on_a_database_goose_migrated(engine: Engine, database_path: Path, directory: Path, latest: int) -> None:
-    _run_goose(directory, database_path, "up")
-
-    migrate_down(engine, directory)
-    migrate_down(engine, directory)
-
-    assert f"goose: version {latest - 2}" in _run_goose(directory, database_path, "version")
-    _run_goose(directory, database_path, "up")
-    assert f"goose: version {latest}" in _run_goose(directory, database_path, "version")
-
-
-@requires_goose
-def test_goose_down_rolls_back_the_same_version_as_migrate_down_when_a_row_is_not_applied(engine: Engine, database_path: Path, tmp_path: Path) -> None:
-    goose_database = tmp_path / "goose.db"
-    migrate_up(engine, SIMULACRA_DIRECTORY)
-    with sqlite3.connect(database_path) as connection:
-        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (2, 1)")
-        connection.execute(f"INSERT INTO {VERSION_TABLE} (version_id, is_applied) VALUES (4, 0)")
-    shutil.copy(database_path, goose_database)
-
-    _run_goose(SIMULACRA_DIRECTORY, goose_database, "down")
-    migrate_down(engine, SIMULACRA_DIRECTORY)
-
-    assert _read_schema(database_path) == _read_schema(goose_database)
-    assert _read_version_rows(database_path) == _read_version_rows(goose_database)
-
-
 def test_migrate_up_and_migrate_down_accept_a_str_directory(engine: Engine) -> None:
     migrate_up(engine, str(SIMULACRA_DIRECTORY))
     assert get_version(engine) == SIMULACRA_LATEST_VERSION
@@ -597,6 +517,14 @@ def test_a_directory_with_no_migration_files_raises_without_touching_the_databas
     assert not database_path.exists()
 
 
+@pytest.mark.parametrize("migrate", [migrate_up, migrate_down], ids=["up", "down"])
+def test_a_missing_directory_raises_without_touching_the_database(engine: Engine, database_path: Path, tmp_path: Path, migrate: Callable[[Engine, Path], None]) -> None:
+    with pytest.raises(MigrationParseError, match="migration directory .*nope does not exist"):
+        migrate(engine, tmp_path / "nope")
+
+    assert not database_path.exists()
+
+
 @requires_goose
 @pytest.mark.parametrize("command", ["up", "down"])
 @pytest.mark.parametrize("names", [[], ["README.md"]], ids=["no_files", "no_sql_files"])
@@ -614,27 +542,10 @@ def test_goose_also_fails_without_touching_the_database_on_a_directory_with_no_m
     assert not database.exists()
 
 
-@requires_goose
-def test_goose_down_also_fails_and_changes_nothing_where_migrate_down_raises(engine: Engine, database_path: Path, tmp_path: Path) -> None:
-    partial_directory = _copy_first_migrations(SIMULACRA_DIRECTORY, tmp_path / "partial", 2)
-    fresh_database = tmp_path / "fresh.db"
-    migrated_database = tmp_path / "migrated.db"
-    migrate_up(engine, SIMULACRA_DIRECTORY)
-    shutil.copy(database_path, migrated_database)
-
-    for directory, database in [(SIMULACRA_DIRECTORY, fresh_database), (partial_directory, migrated_database)]:
-        command = ["goose", "-dir", str(directory), "sqlite3", str(database), "down"]
-        assert subprocess.run(command, capture_output=True, text=True, check=False).returncode != 0
-
-    assert _read_version_rows(fresh_database) == [(0, 1)]
-    assert _read_schema(migrated_database) == _read_schema(database_path)
-    assert _read_version_rows(migrated_database) == _read_version_rows(database_path)
-
-
 def test_a_failing_no_transaction_down_keeps_its_earlier_statements_and_the_version_row(engine: Engine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    down = "-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\nDROP TABLE b;\n"
-    migration_text = f"-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n{down}"
+    down = "-- down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\nDROP TABLE b;\n"
+    migration_text = f"-- no transaction\n-- up\nCREATE TABLE a (x INTEGER);\nCREATE TABLE b (x INTEGER);\n{down}"
     _write_migration(directory, "00001_ab.sql", migration_text)
     migrate_up(engine, directory)
 
@@ -701,7 +612,7 @@ async def test_the_async_functions_use_the_version_table_name_they_are_given(asy
 
 async def test_a_failure_in_the_second_statement_over_aiosqlite_leaves_no_partial_schema_or_version_row(async_engine: AsyncEngine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\nINSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match=r"00001_a\.sql: .*no such table: missing") as raised:
         await migrate_up_async(async_engine, directory)
@@ -713,7 +624,7 @@ async def test_a_failure_in_the_second_statement_over_aiosqlite_leaves_no_partia
 
 async def test_a_failing_down_over_aiosqlite_leaves_the_schema_and_version_row_intact(async_engine: AsyncEngine, database_path: Path, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n-- +goose Down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n-- down\nDROP TABLE a;\nINSERT INTO missing VALUES (1);\n")
     await migrate_up_async(async_engine, directory)
 
     with pytest.raises(MigrationExecutionError, match="no such table: missing"):
@@ -725,7 +636,7 @@ async def test_a_failing_down_over_aiosqlite_leaves_the_schema_and_version_row_i
 
 async def test_a_transactional_migration_over_aiosqlite_runs_inside_a_transaction(async_engine: AsyncEngine, tmp_path: Path) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose Up\nVACUUM;\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- up\nVACUUM;\n")
 
     with pytest.raises(MigrationExecutionError, match="cannot VACUUM from within a transaction"):
         await migrate_up_async(async_engine, directory)
@@ -735,9 +646,9 @@ async def test_a_no_transaction_migration_over_aiosqlite_runs_in_autocommit_and_
     async_engine: AsyncEngine, database_path: Path, tmp_path: Path
 ) -> None:
     directory = tmp_path / "migrations"
-    _write_migration(directory, "00001_vacuum.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nVACUUM;\n")
-    _write_migration(directory, "00002_a.sql", "-- +goose Up\nCREATE TABLE a (x INTEGER);\n")
-    _write_migration(directory, "00003_b.sql", "-- +goose NO TRANSACTION\n-- +goose Up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
+    _write_migration(directory, "00001_vacuum.sql", "-- no transaction\n-- up\nVACUUM;\n")
+    _write_migration(directory, "00002_a.sql", "-- up\nCREATE TABLE a (x INTEGER);\n")
+    _write_migration(directory, "00003_b.sql", "-- no transaction\n-- up\nINSERT INTO a VALUES (1);\nINSERT INTO missing VALUES (1);\n")
 
     with pytest.raises(MigrationExecutionError, match=r"00003_b\.sql: "):
         await migrate_up_async(async_engine, directory)

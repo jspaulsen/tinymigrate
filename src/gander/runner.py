@@ -143,7 +143,7 @@ def _migrate_down(connection: Connection, migrations: list[Migration], directory
     if migration is None:
         raise MigrationRollbackError(f"no migration file for the current version {current} in {directory}")
     if migration.down_statements is None:
-        raise MigrationRollbackError(f"{migration.path}: cannot roll back version {current}: the file has no -- +goose Down section")
+        raise MigrationRollbackError(f"{migration.path}: cannot roll back version {current}: the file has no -- down section")
 
     _run_migration(connection, migration, migration.down_statements, lambda connection: _delete_version(connection, table, current))
     logger.info("rolled back migration %s", migration.path.name)
@@ -185,7 +185,7 @@ def _run_migration(connection: Connection, migration: Migration, statements: tup
 
 
 def _split_statement(statement: str) -> list[str]:
-    # goose's splitter can leave several SQL statements in one string (`a; b;`), which Python's sqlite3
+    # A parsed statement ends at a line, so one line can leave several in one string (`a; b;`), which Python's sqlite3
     # refuses; SQLite's completeness check splits them without breaking a literal, comment or trigger.
     sql_statements: list[str] = []
     pending = ""

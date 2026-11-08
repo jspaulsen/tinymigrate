@@ -8,8 +8,8 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 
 1. **No binary.** Plain Python on top of SQLAlchemy 2.x. No subprocess, no `GOOSE_*`
    environment variables, no `.env` lookup. Everything is passed explicitly.
-2. **goose-compatible files.** Existing migration directories from simulacra and hearth
-   work unchanged.
+2. **Simple migration files.** gander's own small syntax (below); an app's goose files
+   need their annotations rewritten once.
 3. **goose-compatible version table.** A database already migrated by goose (table
    `goose_db_version`) is picked up where goose left off, and goose can read a database
    gander migrated. Apps switch over without touching their databases.
@@ -18,29 +18,25 @@ which today shell out to the `goose` Go binary at startup to run `up` on a SQLit
 
 ## Migration files
 
+gander's own syntax, not goose's: goose annotations (`-- +goose Up`, `StatementBegin`/`End`)
+are ordinary comments to it.
+
 - One file per migration in a flat directory, named `<version>_<description>.sql`, where
   `<version>` is a positive integer that fits in 64 bits (`00001_create_chat_log.sql`).
-  Files are ordered by the integer, not the string. Files not ending in `.sql` are
-  ignored. Two files with the same version, a `.sql` file without a numeric prefix, or,
-  as in goose, a directory with no `.sql` file, are an error.
-- Annotations, as in goose:
-  - `-- +goose Up` starts the up section (required, exactly once).
-  - `-- +goose Down` starts the down section (optional).
-  - `-- +goose StatementBegin` / `-- +goose StatementEnd` wrap one statement that
-    contains semicolons (e.g. a trigger body); it is sent as a single statement.
-  - `-- +goose NO TRANSACTION` runs that file outside a transaction.
-  - Annotations are matched as goose v3.28.0 matches them: a line starting with `--`
-    that contains a lowercase `+goose`; the annotation word is case-insensitive and
-    surrounding whitespace is ignored. An indented annotation, or an unknown one
-    (including goose's `ENVSUB ON`/`OFF`), is an error.
-- Outside a StatementBegin/End block, a statement ends at a line whose last word before
-  any `--` comment ends in `;` (so `x; -- note` ends one, `x;--note` and a `;` mid-line
-  do not). Comment-only and blank lines between statements are dropped; inside a
-  statement they are kept, and, as in goose, a whitespace-only line starts a statement.
-  Comments and blank lines before `-- +goose Up` are ignored (simulacra's
-  `00001_init.sql` has a leading comment); SQL there is an error.
-- Malformed files (no Up, duplicate Up or Down, unterminated StatementBegin, trailing
-  statement without `;`) raise a clear error naming the file and line. Both directions
+  Files are ordered by the integer, not the string. Files not ending in `.sql`, and
+  subdirectories, are ignored. Two files with the same version, a `.sql` file without a
+  numeric prefix, a directory with no `.sql` file, and a missing directory are an error.
+- Markers, each a whole line, case-insensitive, surrounding whitespace ignored:
+  - `-- up` starts the up section (required, exactly once).
+  - `-- down` starts the down section (optional, at most once, after `-- up`).
+  - `-- no transaction`, anywhere before `-- up`, runs that file outside a transaction.
+  Any other comment is just a comment.
+- Only `--` comment lines and blank lines may come before `-- up`.
+- Statements are split by accumulating lines until `sqlite3.complete_statement` says the
+  buffer is complete, so a trigger body (`BEGIN ... END;`) needs no marker. A section that
+  ends with an incomplete statement is an error. Comments and blank lines before a
+  statement belong to it; a comment-only remainder at the end of a section is dropped.
+- Malformed files raise `MigrationParseError` naming the file and line. Both directions
   are checked when a file is parsed.
 
 ## Version table
@@ -66,13 +62,13 @@ against the real goose binary (v3.28.0 is installed) rather than from memory.
 - `up`: apply every migration newer than the largest version in the version table (goose's
   rule), in order. Each migration file runs in its own transaction together with its
   version-table insert, so a failing migration leaves no partial schema and no version
-  row; earlier ones in the same run stay applied. `NO TRANSACTION` files run statement by
+  row; earlier ones in the same run stay applied. `-- no transaction` files run statement by
   statement, in autocommit. Running `up` on an up-to-date database does nothing.
 - `down`: roll back the migration of the current version (as `version` computes it) using
-  its Down section, in one transaction with deleting every version-table row for that
-  version (`NO TRANSACTION` files in autocommit, as for `up`). A database at version 0, a
-  current version with no file in the directory, and a migration with no Down section
-  raise; an empty Down section only deletes the rows.
+  its down section, in one transaction with deleting every version-table row for that
+  version (`-- no transaction` files in autocommit, as for `up`). A database at version 0, a
+  current version with no file in the directory, and a migration with no down section
+  raise; an empty down section only deletes the rows.
 - `version`: the current version as goose computes it: walking rows newest first, the first
   version whose newest row has `is_applied = 1` (0 for a fresh database).
 - Errors are subclasses of one package base exception and name the migration file where
@@ -80,11 +76,11 @@ against the real goose binary (v3.28.0 is installed) rather than from memory.
 
 ## Out of scope for the MVP
 
-CLI, `create` command, Go migrations, dialects other than SQLite, environment-variable
-substitution, out-of-order/missing migrations, locking. See `docs/FUTURE.md`.
+CLI, `create` command, Go migrations, dialects other than SQLite, out-of-order/missing
+migrations, locking. See `docs/FUTURE.md`.
 
 ## Done when
 
-simulacra's and hearth's migration directories apply cleanly with gander; a database
-migrated by goose is continued by gander and the reverse; the package installs from a
-GitHub tag the way goose-py does.
+simulacra's and hearth's migration directories, converted to gander's syntax, apply
+cleanly; a database migrated by goose is continued by gander, and goose reads the version
+gander leaves; the package installs from a GitHub tag the way goose-py does.

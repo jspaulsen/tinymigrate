@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 -- The prompt behind every stored reply: one row per reply version, so each swipe has its own
 -- (decision 95). Written with the reply's event. A debugging record like last_prompts: not
 -- memory, and not part of the log, so rows go when their message is deleted.
@@ -33,6 +33,6 @@ CREATE UNIQUE INDEX reply_prompts_swipe ON reply_prompts(message_id, swipe_index
 -- Shows "View prompt" on each reply in the web app. Recording doesn't read it.
 ALTER TABLE runtime_configuration ADD COLUMN show_reply_prompts INTEGER NOT NULL DEFAULT 0 CHECK (show_reply_prompts IN (0, 1));
 
--- +goose Down
+-- down
 ALTER TABLE runtime_configuration DROP COLUMN show_reply_prompts;
 DROP TABLE reply_prompts;

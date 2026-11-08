@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 CREATE TABLE lorebooks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -51,7 +51,7 @@ ALTER TABLE chats ADD COLUMN lorebook_id INTEGER REFERENCES lorebooks(id);
 
 CREATE UNIQUE INDEX chats_st_file_name ON chats(character_id, st_file_name) WHERE st_file_name IS NOT NULL;
 
--- +goose Down
+-- down
 DROP INDEX chats_st_file_name;
 DROP INDEX characters_st_avatar;
 DROP INDEX lore_entries_st_uid;

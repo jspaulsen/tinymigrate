@@ -12,11 +12,11 @@
 6. **Install from GitHub tags, not PyPI**, as goose-py does.
 7. **Public functions are `migrate_up`, `migrate_down`, `get_version`** (+ `_async` variants) rather
    than goose's bare `up`/`down`, per the user's naming rules.
-8. **Statements are split exactly as goose v3.28.0's `internal/sqlparser` splits them**, checked
+8. *(Superseded by 21.)* **Statements were split exactly as goose v3.28.0's `internal/sqlparser` splits them**, checked
    against the binary: a statement ends at a line whose last word before a `--` comment ends in
    `;`, so a `;` mid-line does not split. goose's sqlite driver runs a multi-statement string
    that Python's `sqlite3` refuses; the executor has to deal with that, not the parser.
-9. **Deliberate divergences from goose's parser**, each checked against the binary: both
+9. *(Superseded by 21.)* **Deliberate divergences from goose's parser**, each checked against the binary: both
    directions are parsed and checked up front (as goose's Provider does; its CLI parses only the
    direction it runs, so `goose up` ignores an unterminated Down statement); a signed version
    (`+3_x.sql`) is rejected; `ENVSUB ON`/`OFF` is rejected rather than honoured, since running
@@ -45,7 +45,8 @@
     a nested `BEGIN` and fail, as would one created with Python 3.12's `connect_args={"autocommit":
     False}`; neither app uses either. The table name is interpolated unquoted, as goose does.
 12. **One parsed statement may hold several SQL statements; gander splits it with
-    `sqlite3.complete_statement`** at each `;`, which respects literals, comments and trigger bodies,
+    `sqlite3.complete_statement`** at each `;` (since 21, this happens only when one line holds
+    more than one, `a; b;`), which respects literals, comments and trigger bodies,
     and runs the pieces one by one inside the same transaction, as goose's driver runs them all.
     Statements go through `exec_driver_sql`, so `:name` or `%s` in a literal is never a parameter.
     A comment-only or empty piece (`SELECT 1; /* c */`, `SELECT 1;;`) still reaches the driver;
@@ -104,3 +105,24 @@
 20. **`Migration`, `parse_migration` and `collect_migrations` stay exported and are documented** in
     the README, for tooling that needs the migrations without a database (a schema snapshot, a CI
     check of the directory).
+21. **gander has its own migration syntax, not goose's** (supersedes 8 and 9). The user never meant
+    to match goose's parser, and porting it meant porting its quirks (a `;` mid-line not
+    splitting, a whitespace-only line pulling comments into a statement, annotation edge cases).
+    Markers are whole lines, `-- up`, `-- down` and `-- no transaction`, case-insensitive with
+    surrounding whitespace ignored; `--up` or `-- +goose Up` is just a comment, so a mistyped
+    `-- up` fails as a missing marker. Statements are lines accumulated until
+    `sqlite3.complete_statement` accepts them, so trigger bodies need no StatementBegin/End.
+    Choices the issue left open: `-- no transaction` after `-- up` is an error rather than a
+    comment, so a misplaced one cannot silently leave the file transactional; "comments" before
+    `-- up` and in a dropped remainder mean `--` line comments, so a `/* */` block there is
+    SQL before `-- up` or an incomplete statement, loud rather than silently skipped; comments
+    before a statement stay part of it. The file-name rules, the 64-bit version limit, the
+    UTF-8 check and keeping a lone `\r` are unchanged. goose can no longer read gander's files,
+    so the tests that cross-checked parsing or file-driven runs against the goose binary are
+    gone; the version-table checks against goose stay until gander owns that table too.
+22. **A missing or non-directory migration path raises `MigrationParseError` naming it**, with
+    the `OSError` as `__cause__`, rather than a bare `FileNotFoundError`/`NotADirectoryError`,
+    so every error gander raises is a `GanderError`. goose v3.28.0 also fails on it (`nope
+    directory does not exist`, checked by hand) without creating the database; gander, which
+    parses before connecting, does not touch the database either. It reuses
+    `MigrationParseError`, as 17 does for an empty directory.

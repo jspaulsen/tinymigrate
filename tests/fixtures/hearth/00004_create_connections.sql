@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 -- A saved way to reach a model: an OpenAI-compatible server root (decision 28), the model name
 -- it serves, and an optional API key, which the API never returns (decision 85).
 CREATE TABLE connections (
@@ -19,6 +19,6 @@ CREATE TABLE runtime_configuration (
 
 INSERT INTO runtime_configuration (id) VALUES (1);
 
--- +goose Down
+-- down
 DROP TABLE runtime_configuration;
 DROP TABLE connections;

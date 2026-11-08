@@ -1,4 +1,4 @@
--- +goose Up
+-- up
 CREATE TABLE characters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -26,21 +26,17 @@ CREATE TABLE events (
 
 CREATE INDEX events_chat_id ON events(chat_id, id);
 
--- +goose StatementBegin
 CREATE TRIGGER events_refuse_update BEFORE UPDATE ON events
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only');
 END;
--- +goose StatementEnd
 
--- +goose StatementBegin
 CREATE TRIGGER events_refuse_delete BEFORE DELETE ON events
 BEGIN
     SELECT RAISE(ABORT, 'events are append-only');
 END;
--- +goose StatementEnd
 
--- +goose Down
+-- down
 DROP TRIGGER events_refuse_delete;
 DROP TRIGGER events_refuse_update;
 DROP TABLE events;
