@@ -643,6 +643,7 @@ async def test_the_async_functions_build_and_roll_back_the_same_schema_as_the_sy
     assert await get_version_async(async_engine) == latest
     assert _read_schema(database_path) == _read_schema(sync_database)
     assert _read_version_rows(database_path) == _read_version_rows(sync_database)
+
     for _ in range(latest):
         await migrate_down_async(async_engine, directory)
     assert await get_version_async(async_engine) == 0
