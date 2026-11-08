@@ -8,3 +8,6 @@
 - Out-of-order / missing-migration detection (`allow_missing`).
 - Locking for concurrent migrators.
 - Replace goose-py with gander in simulacra and hearth.
+- Turn `PRAGMA foreign_keys` off while migrating (goose's own connection has it off), so a
+  table rebuild on an app engine with `foreign_keys=ON` cannot cascade.
+- Support engines using SQLAlchemy's pysqlite "emit BEGIN on begin" recipe.
