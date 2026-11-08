@@ -6,5 +6,5 @@ class GanderError(Exception):
 
 class MigrationParseError(GanderError):
     """
-    A migration file, or a directory of them, that does not follow goose's format.
+    An error raised when a migration file, or a directory of them, does not follow goose's format.
     """

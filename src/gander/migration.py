@@ -119,6 +119,7 @@ def parse_migration(path: Path) -> Migration:
         raise MigrationParseError(f"{path}:{block_line_number}: '-- +goose StatementBegin' without '-- +goose StatementEnd'")
     if "\n".join(buffer).strip():
         raise MigrationParseError(f"{path}:{buffer_line_number}: statement has no terminating ';'")
+
     return Migration(
         version=version,
         description=description,
@@ -140,10 +141,10 @@ def collect_migrations(directory: Path) -> list[Migration]:
     migrations: dict[int, Migration] = {}
     for path in paths:
         migration = parse_migration(path)
-        existing = migrations.get(migration.version)
-        if existing is not None:
+        if (existing := migrations.get(migration.version)) is not None:
             raise MigrationParseError(f"version {migration.version} is used by both {existing.path} and {path}")
         migrations[migration.version] = migration
+
     return [migrations[version] for version in sorted(migrations)]
 
 
@@ -156,6 +157,7 @@ def _parse_file_name(path: Path) -> tuple[int, str]:
         raise MigrationParseError(f"{path}: version must be greater than zero")
     if version > _MAX_VERSION:
         raise MigrationParseError(f"{path}: version must be at most {_MAX_VERSION}")
+
     return version, match["description"]
 
 
@@ -168,6 +170,7 @@ def _read_lines(path: Path) -> list[str]:
     except UnicodeDecodeError as error:
         line_number = data.count(b"\n", 0, error.start) + 1
         raise MigrationParseError(f"{path}:{line_number}: not valid UTF-8 ({error.reason} at byte {error.start})") from error
+
     return [line.removesuffix("\r") for line in text.split("\n")]
 
 
@@ -195,4 +198,5 @@ def _ends_statement(line: str) -> bool:
         if word.startswith("--"):
             break
         last_word = word
+
     return last_word.endswith(";")

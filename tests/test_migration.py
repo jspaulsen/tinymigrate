@@ -36,11 +36,9 @@ BEGIN
 END;"""
 
 
-# Lines goose's splitter treats specially: a trailing comment, a `;` glued to a comment, a `;`
-# mid-line, a whitespace-only line opening a statement, comments inside statements, and a block
-# in the Down section. Every statement is valid SQLite so goose runs it. The cross-check sees
-# goose's log, which drops `--` and empty lines, so it pins where statements split, not that
-# text; the whitespace-only line is spelled `\x20` so an editor trimming trailing spaces keeps it.
+# Lines goose's splitter treats specially, all valid SQLite so goose runs them. goose's log drops
+# `--` and empty lines, so the cross-check pins where statements split, not their text.
+# The whitespace-only line is spelled `\x20` so an editor trimming trailing spaces keeps it.
 GOOSE_SPLIT_EDGE_CASES = """-- leading comment
 -- +goose Up
 CREATE TABLE a (x INTEGER);  -- trailing comment
@@ -84,6 +82,7 @@ NON_UTF8_MIGRATION = b"-- +goose Up\n-- caf\xe9\nSELECT 1;\n"
 def _write_migration(directory: Path, name: str, text: str) -> Path:
     path = directory / name
     path.write_text(text, encoding="utf-8")
+
     return path
 
 
@@ -94,6 +93,7 @@ def _run_goose(directory: Path, database: Path, command: str) -> list[str]:
 
 def _clear_statement(statement: str) -> str:
     statement = GOOSE_LOG_COMMENT_PATTERN.sub("", statement)
+
     return GOOSE_LOG_EMPTY_LINE_PATTERN.sub("", statement).strip()
 
 
