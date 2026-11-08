@@ -24,5 +24,5 @@ class UnsupportedDialectError(GanderError):
 
 class MigrationRollbackError(GanderError):
     """
-    An error raised when there is no migration to roll back, or its file has no Down section.
+    An error raised when there is no migration to roll back, no file for it, or its file has no Down section.
     """

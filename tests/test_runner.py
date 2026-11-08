@@ -500,7 +500,7 @@ def test_a_transactional_down_runs_inside_a_transaction(engine: Engine, database
 
 
 @pytest.mark.parametrize(("directory", "latest"), [(HEARTH_DIRECTORY, HEARTH_LATEST_VERSION), (SIMULACRA_DIRECTORY, SIMULACRA_LATEST_VERSION)], ids=["hearth", "simulacra"])
-def test_rolling_every_migration_back_and_reapplying_gives_the_same_schema(engine: Engine, database_path: Path, tmp_path: Path, directory: Path, latest: int) -> None:
+def test_rolling_every_migration_back_and_reapplying_gives_the_same_schema(engine: Engine, database_path: Path, directory: Path, latest: int) -> None:
     migrate_up(engine, directory)
     schema = _read_schema(database_path)
 
