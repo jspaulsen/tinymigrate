@@ -309,13 +309,17 @@ def _raise_os_error_without_strerror(_path: Path) -> None:
     raise OSError("device went away")
 
 
-def test_an_os_error_without_strerror_is_reported_by_its_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_file_os_error_without_strerror_is_reported_by_its_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = _write_migration(tmp_path, "00001_x.sql", "-- up\nSELECT 1;\n")
     monkeypatch.setattr(Path, "read_bytes", _raise_os_error_without_strerror)
-    monkeypatch.setattr(Path, "iterdir", _raise_os_error_without_strerror)
 
     with pytest.raises(MigrationParseError, match=r"00001_x\.sql: cannot read the migration file: device went away$"):
         parse_migration(path)
+
+
+def test_a_directory_os_error_without_strerror_is_reported_by_its_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "iterdir", _raise_os_error_without_strerror)
+
     with pytest.raises(MigrationParseError, match=r"cannot read the migration directory .*: device went away$"):
         collect_migrations(tmp_path)
 

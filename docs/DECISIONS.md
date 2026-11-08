@@ -43,7 +43,7 @@
     foreign_keys` is a no-op inside a transaction, so a file that needs it off must be `NO
     TRANSACTION`. An engine using SQLAlchemy's pysqlite "begin event emits BEGIN" recipe would get
     a nested `BEGIN` and fail, as would one created with Python 3.12's `connect_args={"autocommit":
-    False}`; neither app uses either. The table name is interpolated unquoted, as goose does.
+    False}`; neither app uses either. The table name is interpolated unquoted.
 12. **One parsed statement may hold several SQL statements; tinymigrate splits it with
     `sqlite3.complete_statement`** at each `;` (since 21, this happens only when one line holds
     more than one, `a; b;`), which respects literals, comments and trigger bodies,

@@ -43,11 +43,11 @@ def migrate_up(engine: Engine, directory: str | Path, *, table: str = DEFAULT_TA
     Each migration runs in its own transaction together with inserting its version-table
     row, stamped with the UTC time in ISO-8601, so a failing one leaves neither partial
     schema nor a row, and the ones before it stay applied. A `-- no transaction` file runs
-    statement by statement in autocommit. Raises
-    `MigrationParseError` before touching the database when a file is malformed or
-    `directory` has no `.sql` file, `MigrationExecutionError` naming the file when the
-    database rejects it, `UnsupportedDialectError` for a database other than SQLite, and
-    `TransactionStateError` when the checked-out connection already has a transaction begun.
+    statement by statement in autocommit. Raises `MigrationParseError` before touching the
+    database when a file is malformed or `directory` has no `.sql` file,
+    `MigrationExecutionError` naming the file when the database rejects it,
+    `UnsupportedDialectError` for a database other than SQLite, and `TransactionStateError`
+    when the checked-out connection already has a transaction begun.
     """
     migrations = collect_migrations(directory)
     with engine.connect() as connection:

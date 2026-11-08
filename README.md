@@ -325,8 +325,8 @@ tinymigrate, copy the applied versions across once, with this SQL saved as `adop
 
 ```sql
 BEGIN;
-CREATE TABLE tinymigrate_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-INSERT INTO tinymigrate_migration (version, applied_at)
+CREATE TABLE IF NOT EXISTS tinymigrate_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+INSERT OR IGNORE INTO tinymigrate_migration (version, applied_at)
 SELECT version_id, strftime('%Y-%m-%dT%H:%M:%S+00:00', tstamp) FROM goose_db_version
 WHERE id IN (SELECT max(id) FROM goose_db_version GROUP BY version_id) AND is_applied = 1 AND version_id > 0;
 COMMIT;
@@ -334,14 +334,15 @@ COMMIT;
 
 ```sh
 sqlite3 app.db < adopt.sql            # or, without the sqlite3 shell:
-python -m sqlite3 app.db < adopt.sql  # Python 3.12+
+python -m sqlite3 app.db < adopt.sql  # Python 3.12+, which echoes its prompts
 ```
 
 A version counts when its newest goose row is applied, as goose counts it; goose's seed row
 for version 0 is left out. `goose_db_version` stays as it was, and can be dropped once the
 app runs on tinymigrate. Stop the app first, so nothing writes to the database meanwhile.
-If the app already started on tinymigrate without it, check what the rerun migrations did,
-then `DROP TABLE tinymigrate_migration;` and run `adopt.sql`.
+Neither shell stops at an error, so the snippet is written to be safe to run again: if the
+app already started on tinymigrate without it, check what the rerun migrations did, then
+run `adopt.sql`; it adds the versions still missing.
 
 ## Development
 
